@@ -44,9 +44,9 @@ import logging
 #_____________________________________________________________________________
 class Com_Modbus:
     def __init__(self):
-        logging.basicConfig()
-        log = logging.getLogger()
-        log.setLevel(logging.DEBUG)
+        #logging.basicConfig()
+        #log = logging.getLogger()
+        #log.setLevel(logging.DEBUG)
 
         #scan all available com port
         port_list = self.scan()
@@ -58,6 +58,7 @@ class Com_Modbus:
             connect = self.client.connect()
             print "Com is connected =",connect
             print "Init Modbus Comm = ",self.client    
+            self.ComState = 0;
     #Scan all available com port on this machine - return list of connected usb com port
     def scan(self):
        # scan for available ports. return a list of tuples (num, name)
@@ -117,7 +118,11 @@ class Com_Modbus:
         
         return register_read
         pass
-
+    
+    #State machine for comm with PLC
+    def Com_State(self):
+        
+        pass
 # Class - Application and core functionality
 #_____________________________________________________________________________
 
@@ -835,6 +840,19 @@ class App:
             self.Modbus_Client.Send_register(10, 0x1234)
             result_read = self.Modbus_Client.Read_register(10)
             print result_read
+            #______________state machine for comm with PLC____________
+            #
+            # State 0 : PLC -> PC : D600 - code 1 - Wood board in place, movement is stopped and ready for scan
+            # State 1 : PC -> PLC : D602 - code 11 - Scanning finished
+            # State 2 : PC -> PLC : D604 - cut coordination
+            # State 3 : PC -> PLC : D602 - code 12 - Result transfer completed
+            # State 4 : PLC -> PC : D600 - code 2 - Reading is done
+            # State 5 : PC -> PLC : D602 - code 10 - Comm idle ready for next set
+            #                       D604 - 0
+            
+            # State 0 : Empty the sample queue
+            #           Wait till it full
+            #           Calc the result - then move to state 1
             
             #print "Read from address = ",readfrom_Address
             #if we have enough sample in the queue then we use machine learning to seperate grouped cut
@@ -850,7 +868,7 @@ class App:
                     result.append(sum(cluster)/len(cluster))
                     print (cluster)
                 print ('result = ',result)
-            self.Modbus_Client
+            
             self.queueLock_work.release()
             """
             >>> import numpy as np
