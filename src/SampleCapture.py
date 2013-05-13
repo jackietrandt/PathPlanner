@@ -6,6 +6,7 @@
 import sys
 import cv2.cv as cv
 from time import gmtime, strftime
+import numpy as np
 
 from PyQt4 import QtCore, QtGui
 from PyQt4.QtCore import QT_VERSION_STR

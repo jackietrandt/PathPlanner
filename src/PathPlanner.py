@@ -1,66 +1,70 @@
 import sys
 import cv2.cv as cv
+import cv2
+import numpy as np
 
-import kivy
-kivy.require('1.0.6') # replace with your current kivy version !
+from time import gmtime, strftime
 
-from kivy.app import App
-from kivy.uix.button import Button
+from PyQt4 import QtCore, QtGui
+from PyQt4.QtCore import QT_VERSION_STR
 
-import time
+# Background module which handle sampling background histogram / filtering
+import Background as bg
+# Class - Text box for putting in note and accept / reject the selected area.
+#_____________________________________________________________________________
+class Dialog(QtGui.QDialog):
+    def __init__(self):
+        super(Dialog, self).__init__()
 
-from math import sin, cos, sqrt, pi, fabs
-import os
+
 def PathFinderMain():
     #USB camera capture 
-    capture1 = cv.CaptureFromCAM(0)
-    capture2 = cv.CaptureFromCAM(1)
+    capture1 = cv2.VideoCapture(0)
+    capture2 = cv2.VideoCapture(1)
+    
 
     #________Program configuration option______
     ModeTest = True # set capture frame resolution 768 x 1024 ___or 1080 x 1920
     CameraDebugScreen = True #show raw capture from camera 1 and 2 for alignment and checking ___or disable at run mode
     #Configure capture screen resolution
     if ModeTest:
-        cv.SetCaptureProperty(capture1, cv.CV_CAP_PROP_FRAME_HEIGHT, 768)
-        cv.SetCaptureProperty(capture1, cv.CV_CAP_PROP_FRAME_WIDTH, 1024)
+        capture1.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1024)
+        capture1.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 768)
 
-        cv.SetCaptureProperty(capture2, cv.CV_CAP_PROP_FRAME_HEIGHT, 768)
-        cv.SetCaptureProperty(capture2, cv.CV_CAP_PROP_FRAME_WIDTH, 1024)
 
     else:
-        cv.SetCaptureProperty(capture1, cv.CV_CAP_PROP_FRAME_HEIGHT, 1080)
-        cv.SetCaptureProperty(capture1, cv.CV_CAP_PROP_FRAME_WIDTH, 1920)
-
-        cv.SetCaptureProperty(capture2, cv.CV_CAP_PROP_FRAME_HEIGHT, 1080)
-        cv.SetCaptureProperty(capture2, cv.CV_CAP_PROP_FRAME_WIDTH, 1920)
+        capture1.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1920)
+        capture1.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 1080)
+        
+    #Test run background sample which sample background color histogram
+    flag, img_background = capture1.read()
+    bg.Background_Sampler(img_background)
+    
     while True:
     
         #img = cv.QueryFrame(capture)
-        img1 = cv.QueryFrame(capture1)
-        img2 = cv.QueryFrame(capture2)
+        flas,img1 = capture1.read()
+        flas,img2 = capture2.read()
     
     
         if CameraDebugScreen:
-            cv.ShowImage("usbCam_1", img1)
-            cv.ShowImage("usbCam_2", img2)
-  
-        #Haar classifier trial
-        storage = cv.CreateMemStorage()
-        haar=cv.LoadHaarClassifierCascade('C:\opencv\data\haarcascades\haarcascade_frontalface_default.xml')
-        detected = cv.HaarDetectObjects(image, haar, storage, 1.2, 2,cv.CV_HAAR_DO_CANNY_PRUNING, (100,100))
-        if detected:
-            for face in detected:
-                print face
+            cv2.imshow("usbCam_1", img1)
+
 
         if cv.WaitKey(2) == 27:
             break
         
-class MyApp(App):
 
-    def build(self):
-        PathFinderMain()
-        return Button(text='Hello World')
 
-if __name__ == '__main__':
-    MyApp().run()
-            
+# Main program where everything start
+#_____________________________________________________________________________
+ 
+def main():
+    print ("Python version = ",sys.version)
+    print ("Opencv version = ",cv.__version__)
+    print("Qt version = ", QT_VERSION_STR)
+    print("Numpy version = ", np.version.version)
+    PathFinderMain()
+ 
+if __name__ == "__main__":
+    main()
