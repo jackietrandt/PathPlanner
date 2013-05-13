@@ -39,9 +39,19 @@ def PathFinderMain():
         img1 = cv.QueryFrame(capture1)
         img2 = cv.QueryFrame(capture2)
     
+    
         if CameraDebugScreen:
             cv.ShowImage("usbCam_1", img1)
             cv.ShowImage("usbCam_2", img2)
+  
+        #Haar classifier trial
+        storage = cv.CreateMemStorage()
+        haar=cv.LoadHaarClassifierCascade('C:\opencv\data\haarcascades\haarcascade_frontalface_default.xml')
+        detected = cv.HaarDetectObjects(image, haar, storage, 1.2, 2,cv.CV_HAAR_DO_CANNY_PRUNING, (100,100))
+        if detected:
+            for face in detected:
+                print face
+
         if cv.WaitKey(2) == 27:
             break
         
