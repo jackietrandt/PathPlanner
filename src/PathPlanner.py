@@ -2,7 +2,7 @@ import sys
 import cv2.cv as cv
 import cv2
 import numpy as np
-
+import math
 from time import gmtime, strftime
 
 from PyQt4 import QtCore, QtGui
@@ -20,13 +20,24 @@ KeyDictionary = {'key_up':2490368,
                  'key_tab':9
                 }
 
-Box = {'x1':0,
+Box_xy = {'x1':0,
        'y1':0,
        'x2':0,
        'y2':0
       }
 
-Color = {'red':(0,0,255)
+Box_hw = {'x':0,
+          'y':0,
+          'w':0,
+          'h':0,
+          'valid':False,
+          'w_old':0,
+          'h_old':0,
+          'variation':3
+          }
+
+Color = {'red':(0,0,255),
+         'black':(0,0,0)
          }
 #_____________________Used in________________________________________________
 #__class Configuration(object):
@@ -51,8 +62,8 @@ BackgroundSample = {'Box_top':{},
                     'Top_border':0,
                     'Bottom_border':0
                     }
-BackgroundSample['Box_top'] = Box
-BackgroundSample['Box_bottom'] = Box
+BackgroundSample['Box_top'] = Box_xy
+BackgroundSample['Box_bottom'] = Box_xy
 
 
 #Configuration class - to hold initial startup configuration when project first load / run
@@ -171,35 +182,130 @@ def PathFinderMain():
     #________Program configuration option______
     ModeTest = True # set capture frame resolution 768 x 1024 ___or 1080 x 1920
     CameraDebugScreen = True #show raw capture from camera 1 and 2 for alignment and checking ___or disable at run mode
+    ProcessDebug = True #show processed image in the middle
     #Configure capture screen resolution
     if ModeTest:
         capture1.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1024)
         capture1.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 768)
-
+        
 
     else:
         capture1.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1920)
         capture1.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 1080)
-        
+    #disable autofocus and auto exposer gain white balance stuff
+    
     #Test run background sample which sample background color histogram
-    flag, img_background = capture1.read()
-    bg.Background_Sampler(img_background)
-    
+    #flag, img_background = capture1.read()
+    #bg.Background_Sampler(img_background)
+    #cap = cv.CaptureFromCAM(-1)
+    #cv.SetCaptureProperty(cap, cv.CV_CAP_PROP_AUTO_EXPOSURE, 0);
+    gain_old = capture1.get(cv2.cv.CV_CAP_PROP_GAIN)
     while True:
-    
+        
+        #check if gain cap changed
+        gain_new = capture1.get(cv2.cv.CV_CAP_PROP_GAIN)
+        if gain_new <> gain_old:
+            print 'CV_CAP_PROP_GAIN = ',capture1.get(cv2.cv.CV_CAP_PROP_GAIN)
+            gain_old = gain_new
+        #print 'CV_CAP_PROP_AUTO_EXPOSURE = ',capture1.get(cv2.cv.CV_CAP_PROP_AUTO_EXPOSURE)
         #img = cv.QueryFrame(capture)
         flas,img1 = capture1.read()
         flas,img2 = capture2.read()
         
         img_trimmed = bg.Background_Trim(img1,TrimParam)
+        
+
+        #Draw a black rectangular around the trimmed image to help with Canny close loop
+        height, width, depth = img_trimmed.shape
+        cv2.rectangle(img_trimmed, (0,0), (width,height), Color['black'],4)
+        #___________________________Smooth___________________________
+        #img_trimmed = bg.Background_k_mean(img_trimmed)
+        #img_trimmed = cv2.GaussianBlur(img_trimmed,(3,3),0)
+        #img_trimmed = cv2.bilateralFilter(img_trimmed,3, 3*2,3/2)
+        #_____________________________________________________________
+        
         img_trimmed_overlay = img_trimmed.copy()
         
+        #___________________________Back projection___________________________
+        #Back project clear out the background using hist of sampled background image
         img_backprojected = bg.Background_remove(img_trimmed,config.Internal['Background_sample_path'])
-        cv2.imshow("BackProject", img_backprojected)
+        #img_backprojected = bg.Background_k_mean(img_backprojected)
+        bg.imshow("BackProject", img_backprojected,ProcessDebug)
+        #_____________________________________________________________________
+
+        #___________________________morphologyEx_______________________________
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(3,3))
+        res = cv2.morphologyEx(img_backprojected,cv2.MORPH_OPEN,kernel)
+        bg.imshow("morphologyEx", res,ProcessDebug)
+        #______________________________________________________________________
+        
+        #___________________________Smooth___________________________
+        #img_trimmed = bg.Background_k_mean(img_trimmed)
+        res = cv2.GaussianBlur(res,(3,3),0)
+        #res = cv2.bilateralFilter(res,3, 3*2,3/2)
+        #_____________________________________________________________        
+        
+        #___________________________Canny___________________________
+        #img_trimmed = bg.Background_k_mean(img_trimmed)
+        img_canny = cv2.Canny(res, 80, 200)
+        bg.imshow("Canny", img_canny,ProcessDebug)
+        #___________________________________________________________
+
+        #_________________________Erode__________________________________
+        #4.Erodes the Thresholded Image
+        #2.Converts to Gray level
+        #cvtcolorImage = cv2.cvtColor(img_canny,cv2.cv.CV_RGB2GRAY)
+        
+        #element = cv2.getStructuringElement(cv2.MORPH_CROSS,(5,5))
+        #cv2.erode(img_canny,element)
+        #cv2.imshow('Eroded',img_canny)
+        
+        #_______________________________________________________________
+
+        #_________________________Dilate__________________________________
+        kernel = np.ones((11,11),'int')
+        img_canny = cv2.dilate(img_canny,kernel)
+        bg.imshow("Dilate",img_canny,ProcessDebug)
+        #_________________________________________________________________
+        
+        
+        #___________________________Box it___________________________
+        contours, hierarchy = cv2.findContours(img_canny,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+        try:
+            cnt=contours[0]
+        except IndexError:
+            print 'No object detected'
+            
+        else:
+            x,y,w,h = cv2.boundingRect(cnt)
+            if (w > 0) & (h > 0):
+                Box_hw['x'] = x
+                Box_hw['y'] = y
+                Box_hw['w'] = w
+                Box_hw['h'] = h
+                Box_hw['valid'] = True
+            else:
+                Box_hw['valid'] = False
+                print 'Box not found'
+            cv2.rectangle(img_backprojected,(x,y),(x+w,y+h),(0,255,0),2)
+            bg.imshow("Show_Contour",img_backprojected,ProcessDebug)
+        #____________________________________________________________
+        
+        #___________________________Extract object____________________________
+        #only update if box h w change more than an average variation
+        if  (math.fabs(Box_hw['w'] - Box_hw['w_old']) > Box_hw['variation'])|(math.fabs(Box_hw['h'] - Box_hw['h_old']) > Box_hw['variation']):
+            
+            Box_hw['w_old'] = Box_hw['w']
+            Box_hw['h_old'] = Box_hw['h']
+            img_object_of = bg.Background_extract_obj(img_trimmed, Box_hw)
+        
+
+        bg.imshow ('object of interest',img_object_of,ProcessDebug)
+        #_____________________________________________________________________
         #img_trimmed_overlay_cv = cv.fromarray(img_trimmed_overlay)
         key = cv.WaitKey(2)
-        if key <> -1:
-            print key
+        #if key <> -1:
+        #    print key
 
         if key == 27:
             break
@@ -215,7 +321,7 @@ def PathFinderMain():
         #______________________________________________________________________________________________
         if key == KeyDictionary['key_t']:
             img_backprojected = bg.Background_remove(img_trimmed,config.Internal['Background_sample_path'])
-            cv2.imshow("BackProject", img_backprojected)
+            bg.imshow("BackProject", img_backprojected,ProcessDebug)
         #______________________________________________________________________________________________
         #______________________________________________________________________________________________
         #Let sample so background image
