@@ -8,6 +8,20 @@ from time import gmtime, strftime
 from PyQt4 import QtCore, QtGui
 from PyQt4.QtCore import QT_VERSION_STR
 
+#for feature tracking
+from common import getsize, draw_keypoints
+from plane_tracker import PlaneTracker
+
+#This for plotting histogram / print out matrix debug info and such
+from mpl_toolkits.mplot3d import axes3d
+import matplotlib
+import matplotlib.pyplot as plt
+import pprint
+
+#________Program configuration option______
+ModeTest = True # set capture frame resolution 768 x 1024 ___or 1080 x 1920
+CameraDebugScreen = True #show raw capture from camera 1 and 2 for alignment and checking ___or disable at run mode
+ProcessDebug = False #show processed image in the middle
 
 #Share generic dictionary which used across functions
 KeyDictionary = {'key_up':2490368,
@@ -37,8 +51,10 @@ Box_hw = {'x':0,
           }
 
 Color = {'red':(0,0,255),
-         'black':(0,0,0)
+         'black':(0,0,0),
+         'white':(255,255,255)
          }
+
 #_____________________Used in________________________________________________
 #__class Configuration(object):
 #__Background_Trim(img_original,TrimParam):
@@ -107,13 +123,11 @@ class Configuration(object):
 
         print '_______________________________________________Load Configruation_______________________________________________'
         print self.ConfigDictionary
-    
     def RunStateUpdate(self):
         self.RunState['KeySelectIndex'] = self.RunState['KeySelectIndex'] + 1
         if (self.RunState['KeySelectIndex'] >= len(self.RunState['KeySelect'])):
             self.RunState['KeySelectIndex'] = 0
         print 'Run state = ',self.RunState['KeySelect'][self.RunState['KeySelectIndex']]
-        
     def GetRunState(self):
         return self.RunState['KeySelect'][self.RunState['KeySelectIndex']]
 #this configuration then be save when press control S - and be load from file when program start to run
@@ -176,13 +190,11 @@ def PathFinderMain():
     print config.RunState
     #USB camera capture 
     capture1 = cv2.VideoCapture(0)
-    capture2 = cv2.VideoCapture(1)
-    
+    #capture2 = cv2.VideoCapture(1)
+    #Tracker for feature detection
+    tracker = PlaneTracker()
 
-    #________Program configuration option______
-    ModeTest = True # set capture frame resolution 768 x 1024 ___or 1080 x 1920
-    CameraDebugScreen = True #show raw capture from camera 1 and 2 for alignment and checking ___or disable at run mode
-    ProcessDebug = True #show processed image in the middle
+
     #Configure capture screen resolution
     if ModeTest:
         capture1.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1024)
@@ -192,13 +204,7 @@ def PathFinderMain():
     else:
         capture1.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1920)
         capture1.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 1080)
-    #disable autofocus and auto exposer gain white balance stuff
     
-    #Test run background sample which sample background color histogram
-    #flag, img_background = capture1.read()
-    #bg.Background_Sampler(img_background)
-    #cap = cv.CaptureFromCAM(-1)
-    #cv.SetCaptureProperty(cap, cv.CV_CAP_PROP_AUTO_EXPOSURE, 0);
     gain_old = capture1.get(cv2.cv.CV_CAP_PROP_GAIN)
     while True:
         
@@ -210,14 +216,14 @@ def PathFinderMain():
         #print 'CV_CAP_PROP_AUTO_EXPOSURE = ',capture1.get(cv2.cv.CV_CAP_PROP_AUTO_EXPOSURE)
         #img = cv.QueryFrame(capture)
         flas,img1 = capture1.read()
-        flas,img2 = capture2.read()
+        #flas,img2 = capture2.read()
         
         img_trimmed = bg.Background_Trim(img1,TrimParam)
         
 
-        #Draw a black rectangular around the trimmed image to help with Canny close loop
-        height, width, depth = img_trimmed.shape
-        cv2.rectangle(img_trimmed, (0,0), (width,height), Color['black'],4)
+
+
+
         #___________________________Smooth___________________________
         #img_trimmed = bg.Background_k_mean(img_trimmed)
         #img_trimmed = cv2.GaussianBlur(img_trimmed,(3,3),0)
@@ -226,28 +232,44 @@ def PathFinderMain():
         
         img_trimmed_overlay = img_trimmed.copy()
         
+        #___________________________Openning__________________________________
+        #
+        img_trimmed = bg.Background_Opening(img_trimmed, 10,2)
+        #img_backprojected = bg.Background_k_mean(img_backprojected)
+        bg.imshow("Open", img_trimmed,ProcessDebug)
+        #_____________________________________________________________________
+        
+        #__________________________Draw Rect__________________________________
+        #
+        #Draw a black rectangular around the trimmed image to help with Canny close loop
+        height, width, depth = img_trimmed.shape
+        cv2.rectangle(img_trimmed, (0,0), (width,height), Color['black'],4)
+        #_____________________________________________________________________
+        
         #___________________________Back projection___________________________
         #Back project clear out the background using hist of sampled background image
         img_backprojected = bg.Background_remove(img_trimmed,config.Internal['Background_sample_path'])
-        #img_backprojected = bg.Background_k_mean(img_backprojected)
-        bg.imshow("BackProject", img_backprojected,ProcessDebug)
+        img_backprojected = bg.Background_k_mean(img_backprojected)
+        
+        #bg.imshow("BackProject", img_backprojected,ProcessDebug)
+        #img_backprojected = img_trimmed
         #_____________________________________________________________________
 
         #___________________________morphologyEx_______________________________
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(3,3))
-        res = cv2.morphologyEx(img_backprojected,cv2.MORPH_OPEN,kernel)
-        bg.imshow("morphologyEx", res,ProcessDebug)
+        #kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(3,3))
+        #res = cv2.morphologyEx(img_backprojected,cv2.MORPH_OPEN,kernel)
+        #bg.imshow("morphologyEx", res,ProcessDebug)
         #______________________________________________________________________
         
         #___________________________Smooth___________________________
         #img_trimmed = bg.Background_k_mean(img_trimmed)
-        res = cv2.GaussianBlur(res,(3,3),0)
+        #res = cv2.GaussianBlur(res,(3,3),0)
         #res = cv2.bilateralFilter(res,3, 3*2,3/2)
         #_____________________________________________________________        
         
         #___________________________Canny___________________________
         #img_trimmed = bg.Background_k_mean(img_trimmed)
-        img_canny = cv2.Canny(res, 80, 200)
+        img_canny = cv2.Canny(img_backprojected, 80, 200)
         bg.imshow("Canny", img_canny,ProcessDebug)
         #___________________________________________________________
 
@@ -263,7 +285,7 @@ def PathFinderMain():
         #_______________________________________________________________
 
         #_________________________Dilate__________________________________
-        kernel = np.ones((11,11),'int')
+        kernel = np.ones((5,5),'int')
         img_canny = cv2.dilate(img_canny,kernel)
         bg.imshow("Dilate",img_canny,ProcessDebug)
         #_________________________________________________________________
@@ -293,16 +315,56 @@ def PathFinderMain():
         
         #___________________________Extract object____________________________
         #only update if box h w change more than an average variation
-        if  (math.fabs(Box_hw['w'] - Box_hw['w_old']) > Box_hw['variation'])|(math.fabs(Box_hw['h'] - Box_hw['h_old']) > Box_hw['variation']):
+        img_object_of = np.zeros((Box_hw['h'],Box_hw['w'],depth),np.uint8)
+        if  (True)|(math.fabs(Box_hw['w'] - Box_hw['w_old']) > Box_hw['variation'])|(math.fabs(Box_hw['h'] - Box_hw['h_old']) > Box_hw['variation']):
             
             Box_hw['w_old'] = Box_hw['w']
             Box_hw['h_old'] = Box_hw['h']
-            img_object_of = bg.Background_extract_obj(img_trimmed, Box_hw)
-        
+            img_object_of = bg.Background_extract_obj(img_trimmed_overlay, Box_hw)
+        bg.imshow ('object of interest',img_object_of,True) 
 
-        bg.imshow ('object of interest',img_object_of,ProcessDebug)
+        
         #_____________________________________________________________________
         #img_trimmed_overlay_cv = cv.fromarray(img_trimmed_overlay)
+        
+        #___________________________Detect Feature____________________________
+        #Detect feature on object of interest
+        
+        tracked = tracker.track(img_object_of)        
+        img_object_of_feature = img_object_of.copy()
+        draw_keypoints(img_object_of_feature, tracker.frame_points)
+        bg.imshow ('feature',img_object_of_feature,True)
+        #_____________________________________________________________________
+        
+        #___________________________X coor histogram____________________________
+        #Detect feature on object of interest
+        #Then need to do a histogram of the detected feature point
+        height, width, depth = img_object_of_feature.shape
+
+        x_coor = []
+        y_coor = []
+        print 'y_coor =',y_coor
+        for kp in tracker.frame_points:
+            x, y = kp.pt
+            x_coor.append(int(x))
+            y_coor.append(int(y))
+        print y_coor
+        #work out histogram 
+        n, bins, patches = plt.hist(y_coor, bins=height, range=(0,height), normed=False, weights=None,
+                                    cumulative=False, bottom=None, histtype='bar', align='mid',
+                                    orientation='vertical', rwidth=None, log=False,
+                                    color=None, label=None, stacked=False)
+        print '______________________________________N______________________________________________'
+        print 'n = ',n
+        print 'size of n = ', len(n)
+        print 'height = ', height
+        print 'bins =', bins
+        plt.show()
+        #_______________________________________________________________________
+        
+        
+        
+        
         key = cv.WaitKey(2)
         #if key <> -1:
         #    print key
@@ -320,8 +382,9 @@ def PathFinderMain():
         #_______________________________________ TEST FUNCTION GO HERE ________________________________
         #______________________________________________________________________________________________
         if key == KeyDictionary['key_t']:
-            img_backprojected = bg.Background_remove(img_trimmed,config.Internal['Background_sample_path'])
-            bg.imshow("BackProject", img_backprojected,ProcessDebug)
+            #img_backprojected = bg.Background_remove(img_trimmed,config.Internal['Background_sample_path'])
+            #bg.imshow("BackProject", img_backprojected,ProcessDebug)
+            bg.Background_Sampler(img_trimmed_overlay)
         #______________________________________________________________________________________________
         #______________________________________________________________________________________________
         #Let sample so background image
@@ -363,6 +426,7 @@ def main():
     print ("Opencv version = ",cv.__version__)
     print("Qt version = ", QT_VERSION_STR)
     print("Numpy version = ", np.version.version)
+    print ("Matplotlib version = ",matplotlib.__version__)
     PathFinderMain()
  
 if __name__ == "__main__":

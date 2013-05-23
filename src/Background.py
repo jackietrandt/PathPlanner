@@ -4,6 +4,14 @@ import cv2.cv as cv
 from time import clock
 import sys
 
+from mpl_toolkits.mplot3d import axes3d
+import matplotlib.pyplot as plt
+import pprint
+
+#for feature tracking
+from common import getsize, draw_keypoints
+from plane_tracker import PlaneTracker
+
 def Background_Sampler(img_background):
     hsv_map = np.zeros((180, 256, 3), np.uint8)
     h, s = np.indices(hsv_map.shape[:2])
@@ -20,12 +28,39 @@ def Background_Sampler(img_background):
     dark = hsv[...,2] < 32
     hsv[dark] = 0
     h = cv2.calcHist( [hsv], [0, 1], None, [180, 256], [0, 180, 0, 256] )
+
+    """
+    #plot this histogram
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    X = h[:,0]
+    Y = h[:,1]
+    Z = h[:,2]
+    ax.plot_wireframe(X, Y, Z, rstride=180, cstride=256)
+
+    plt.show()
+    """    
     #hist scale from 10 to 32
     hist_scale = 10
     #np.clip(a, a_min, a_max) - clipping off histogram bin ?!
     h = np.clip(h*0.005*hist_scale, 0, 1)
+
+    #pprint.pprint(stuff, width=60)
+    #pprint.pprint(stuff, depth=3)
+    #pp = pprint.PrettyPrinter(indent=4)
+    #pp.pprint(stuff)
+    #In other words, if "data" is the matrix then:
+    #data[:, 0] # values of X-axis
+    #data[:, 1] # values of Y-axis
+    #data[:, 2] # values of each Z-axis bar 
+
+    
     vis = hsv_map*h[:,:,np.newaxis] / 255.0
+    
+
+    
     cv2.imshow('hist', vis)
+   
     
 def Background_Trim(img_original,TrimParam):
     #if trim left right up, top bottom doesnt bigger than the whole image then
@@ -68,10 +103,22 @@ def Background_Sample(img_trimmed,BackgroundSample):
         #then we happy to copy it over
         img_top_sample[0:BackgroundSample['Top_border'],0:width] = img_trimmed[0:BackgroundSample['Top_border'],0:width]
         img_bottom_sample[0:BackgroundSample['Bottom_border'],0:width] = img_trimmed[height - BackgroundSample['Bottom_border']:height,0:width]
-        #img_merged_sample [0:BackgroundSample['Top_border'],0:width] = img_trimmed[0:BackgroundSample['Top_border'],0:width]
-        #img_merged_sample [BackgroundSample['Top_border']:BackgroundSample['Top_border'] + BackgroundSample['Bottom_border'],0:width] = img_trimmed[height - BackgroundSample['Bottom_border']:height,0:width]
         img_merged_sample = np.vstack((img_top_sample,img_bottom_sample))
         return img_merged_sample
+
+#_____________________Used in________________________________________________
+#__PathFinderMain():
+#____________________________________________________________________________
+#__Image processing, transfor from very detail to blur segmented
+#__
+def Background_Opening(src,size,iters):
+    #cycle(['ellipse', 'rect', 'cross'])
+    str_name = 'MORPH_' + 'RECT'
+    #cycle(['erode/dilate', 'open/close', 'blackhat/tophat', 'gradient'])
+    oper_name = 'MORPH_' + 'OPEN'
+    st = cv2.getStructuringElement(getattr(cv2, str_name), (size, size))
+    res = cv2.morphologyEx(src, getattr(cv2, oper_name), st, iterations=iters)
+    return res
 
 #_____________________Used in________________________________________________
 #__PathFinderMain():
@@ -132,8 +179,10 @@ def Background_k_mean(img_trimmed):
 #__If the debug option is off then do not show all the image
 def imshow(name,imgage,debug):
     if debug:
-        cv2.imshow(name, imgage)
-        
+        try:
+            cv2.imshow(name, imgage)
+        except:
+            pass
 #_____________________Used in________________________________________________
 #__PathFinderMain():
 #____________________________________________________________________________
@@ -144,4 +193,4 @@ def Background_extract_obj(img_original,Box_hw):
         height,width,depth = img_original.shape
         img_object = np.zeros((Box_hw['h'],Box_hw['w'],depth),np.uint8)
         img_object[0:Box_hw['h'],0:Box_hw['w']] = img_original[Box_hw['y']:Box_hw['y'] + Box_hw['h'],Box_hw['x']:Box_hw['x'] + Box_hw['w']]
-    return img_object
+        return img_object
