@@ -81,16 +81,32 @@ BackgroundSample = {'Box_top':{},
 BackgroundSample['Box_top'] = Box_xy
 BackgroundSample['Box_bottom'] = Box_xy
 
+#_____________________Used in________________________________________________
+#__class Configuration(object):
+#____________________________________________________________________________
+#__Cutting dimension of  saw blade width, strip 1 width, saw blade width, strip 2 width, saw blade width
+#__used on x coordination histogram to figure out which cut path to take
+#__All dimension is in 1 mm
+CutParam = {'Blade_1':1,            #Top blade
+            'Strip_1':10,           #Top strip
+            'Blade_2':1,            #Middle blade
+            'Strip_2':10,           #Bottom strip
+            'Blade_3':1,            #Bottom blade
+            'Good_threadhold':2,    #Number of defect feature counted, lower than or equal to this to count as good piece
+            'Perfect_threadhold':0, #Number of defect feature counted, lower than or equal to this to count as perfect piece
+            'Initialised':False}    #Initalise function should be called only once, then turn this true and not call it anymore
 
 #Configuration class - to hold initial startup configuration when project first load / run
 class Configuration(object):
     def __init__(self):
         #Define what in the config dictionary
         self.ConfigDictionary = {'TrimParam':{},
-                                 'BackgroundSample':{}}
+                                 'BackgroundSample':{},
+                                 'CutParam':{}}
         #Define the structure of each config block
         self.ConfigDictionary['TrimParam'] = TrimParam
         self.ConfigDictionary['BackgroundSample'] = BackgroundSample
+        self.ConfigDictionary['CutParam'] = CutParam
         
         #Define structure of run state
         self.KeySelectState = 'Operational','TrimArea','Background_top','Background_bottom'
@@ -112,7 +128,7 @@ class Configuration(object):
         try:
             s = open('Config\config.ini', 'r').read()
         except RuntimeError:
-            raise 
+            print 'Config\config.ini _______ File not found'
         else:
             print 'Config\config.ini _______ File not found'
             #pass # does nothing
@@ -186,6 +202,7 @@ def PathFinderMain():
     config.read()
     TrimParam = config.ConfigDictionary['TrimParam']
     BackgroundSample = config.ConfigDictionary['BackgroundSample']
+    CutParam = config.ConfigDictionary['CutParam']
     print '_______________________________________________Run State_______________________________________________'
     print config.RunState
     #USB camera capture 
@@ -336,31 +353,113 @@ def PathFinderMain():
         bg.imshow ('feature',img_object_of_feature,True)
         #_____________________________________________________________________
         
-        #___________________________X coor histogram____________________________
+        #___________________________y coor histogram____________________________
         #Detect feature on object of interest
         #Then need to do a histogram of the detected feature point
         height, width, depth = img_object_of_feature.shape
 
         x_coor = []
         y_coor = []
-        print 'y_coor =',y_coor
         for kp in tracker.frame_points:
             x, y = kp.pt
             x_coor.append(int(x))
             y_coor.append(int(y))
-        print y_coor
+        #print y_coor
         #work out histogram 
-        n, bins, patches = plt.hist(y_coor, bins=height, range=(0,height), normed=False, weights=None,
-                                    cumulative=False, bottom=None, histtype='bar', align='mid',
-                                    orientation='vertical', rwidth=None, log=False,
-                                    color=None, label=None, stacked=False)
-        print '______________________________________N______________________________________________'
-        print 'n = ',n
-        print 'size of n = ', len(n)
-        print 'height = ', height
-        print 'bins =', bins
-        plt.show()
-        #_______________________________________________________________________
+        #n, bins, patches = plt.hist(y_coor,bins=height,range=(0,height),normed=False,weights=None,cumulative=False,bottom=None,histtype='bar',align='mid',orientation='vertical',rwidth=None,log=False,color=None,label=None,stacked=False)
+        bins = np.arange(height+1)
+        hist, bin_edges = np.histogram(y_coor, bins)
+        
+        #______________________________________generate strip matrix__________________________
+
+        
+        if not CutParam['Initialised']:
+            cut_band_pair = np.arange(CutParam['Blade_1'] + CutParam['Strip_1'] + CutParam['Blade_2'] + CutParam['Strip_2'] + CutParam['Blade_3'])
+            for i in range(0, len(cut_band_pair)):
+                if i < CutParam['Blade_1']:
+                    cut_band_pair[i] = 0
+                elif i < (CutParam['Blade_1'] + CutParam['Strip_1']):
+                    cut_band_pair[i] = 1
+                elif i < (CutParam['Blade_1'] + CutParam['Strip_1'] + CutParam['Blade_2']):
+                    cut_band_pair[i] = 0
+                elif i < (CutParam['Blade_1'] + CutParam['Strip_1'] + CutParam['Blade_2'] + CutParam['Strip_2']):
+                    cut_band_pair[i] = 1
+                elif i < (CutParam['Blade_1'] + CutParam['Strip_1'] + CutParam['Blade_2'] + CutParam['Strip_2'] + CutParam['Blade_3']):
+                    cut_band_pair[i] = 0
+                    
+            cut_band_1 = np.arange(CutParam['Blade_1'] + CutParam['Strip_1'] + CutParam['Blade_2'] + CutParam['Strip_2'] + CutParam['Blade_3'])
+            for i in range(0, len(cut_band_1)):
+                if i < CutParam['Blade_1']:
+                    cut_band_1[i] = 0
+                elif i < (CutParam['Blade_1'] + CutParam['Strip_1']):
+                    cut_band_1[i] = 1
+                elif i < (CutParam['Blade_1'] + CutParam['Strip_1'] + CutParam['Blade_2']):
+                    cut_band_1[i] = 0
+                elif i < (CutParam['Blade_1'] + CutParam['Strip_1'] + CutParam['Blade_2'] + CutParam['Strip_2']):
+                    cut_band_1[i] = 0
+                elif i < (CutParam['Blade_1'] + CutParam['Strip_1'] + CutParam['Blade_2'] + CutParam['Strip_2'] + CutParam['Blade_3']):
+                    cut_band_1[i] = 0
+
+            cut_band_2 = np.arange(CutParam['Blade_1'] + CutParam['Strip_1'] + CutParam['Blade_2'] + CutParam['Strip_2'] + CutParam['Blade_3'])
+            for i in range(0, len(cut_band_2)):
+                if i < CutParam['Blade_1']:
+                    cut_band_2[i] = 0
+                elif i < (CutParam['Blade_1'] + CutParam['Strip_1']):
+                    cut_band_2[i] = 0
+                elif i < (CutParam['Blade_1'] + CutParam['Strip_1'] + CutParam['Blade_2']):
+                    cut_band_2[i] = 0
+                elif i < (CutParam['Blade_1'] + CutParam['Strip_1'] + CutParam['Blade_2'] + CutParam['Strip_2']):
+                    cut_band_2[i] = 1
+                elif i < (CutParam['Blade_1'] + CutParam['Strip_1'] + CutParam['Blade_2'] + CutParam['Strip_2'] + CutParam['Blade_3']):
+                    cut_band_2[i] = 0
+
+            CutParam['Initialised'] = True
+        #print cut_band    
+        #print cut_band and hist
+        #now we and them small and big across the band, result matrix then summed and put in the index
+        #this section addressing dual strip perfect scenario
+        
+        print 'hist = '
+        print hist
+        print 'cut band = '
+        print cut_band_pair
+        print 'cut band 1 = '
+        print cut_band_1
+        print 'cut band 2 = '
+        print cut_band_2
+        
+        #for i in range(len(hist) + len(cut_band)*2):
+        #    and_result = bg.Background_operator_and (cut_band, hist, i - len(cut_band))
+            #print 'result = ',and_result 
+        #    array_and_sum[i] = and_result.sum()
+        array_and_sum = [0]*(len(hist))
+        for i in range(len(hist)):
+            and_result = bg.Background_operator_and (cut_band_pair, hist,i)
+            #print 'result = ',and_result 
+            array_and_sum[i] = and_result.sum()
+        
+        array_and_sum_1 = [0]*(len(hist))
+        for i in range(len(hist)):
+            and_result = bg.Background_operator_and (cut_band_1, hist,i)
+            #print 'result = ',and_result 
+            array_and_sum_1[i] = and_result.sum()
+
+        array_and_sum_2 = [0]*(len(hist))
+        for i in range(len(hist)):
+            and_result = bg.Background_operator_and (cut_band_2, hist,i)
+            #print 'result = ',and_result 
+            array_and_sum_2[i] = and_result.sum()
+
+
+        print '_______________________________________________________________________'
+        print 'array_and_sum '
+        print array_and_sum
+        print 'array_and_sum_1 '
+        print array_and_sum_1
+        print 'array_and_sum_2 '
+        print array_and_sum_2
+         
+        #_____________________________________________________________________________________
         
         
         

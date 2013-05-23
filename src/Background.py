@@ -7,6 +7,7 @@ import sys
 from mpl_toolkits.mplot3d import axes3d
 import matplotlib.pyplot as plt
 import pprint
+import math
 
 #for feature tracking
 from common import getsize, draw_keypoints
@@ -194,3 +195,50 @@ def Background_extract_obj(img_original,Box_hw):
         img_object = np.zeros((Box_hw['h'],Box_hw['w'],depth),np.uint8)
         img_object[0:Box_hw['h'],0:Box_hw['w']] = img_original[Box_hw['y']:Box_hw['y'] + Box_hw['h'],Box_hw['x']:Box_hw['x'] + Box_hw['w']]
         return img_object
+
+#_____________________Used in________________________________________________
+#__PathFinderMain():
+#____________________________________________________________________________
+#__And different size array with offet
+#__small = 001110
+#__big   = 001010010
+#__offset= 3
+#__result= 000000010
+def Background_operator_and (small, big, offset):
+    #small array manipulate
+    if len(small) > len(big):
+        small = small[0:len(big)] 
+    if offset > 0:
+        array_buff = [0]*len(big)
+        array_buff = np.array(array_buff)
+        if (offset + len(small)) <= len(big):
+            array_buff[offset:len(small)+offset] = small
+            res = array_buff * big
+            return res
+        elif offset >= len(big):
+            return array_buff
+        else:
+            array_buff[offset:] = small[0:len(big)-offset]
+            res = array_buff * big
+            return res
+    elif offset < 0:
+        if math.fabs(offset) >= (len(small)):
+            array_buff = [0]*len(big)
+            res = np.array(array_buff)
+            return res
+        else:
+            #Fixed
+            small_offseted = small[math.fabs(offset):]
+            array_buff = [0]*len(big)
+            array_buff = np.array(array_buff)
+            array_buff[0:len(small_offseted)] = small_offseted
+            res = array_buff * big
+            return res
+    else:   #this case there is no offset, just buff up the small array then end
+        array_buff = [0]*len(big)
+        array_buff = np.array(array_buff)
+        array_buff[0:len(small)] = small
+        res = array_buff * big
+        return res
+        
+        
