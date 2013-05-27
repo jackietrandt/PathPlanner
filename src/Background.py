@@ -153,6 +153,51 @@ def Background_remove(img_trimmed,sample_path):
  
     #res = np.vstack((target,thresh,res))
     return res
+#_____________________Used in________________________________________________
+#__PathFinderMain():
+#____________________________________________________________________________
+#__back project histogram of feature mask to get bigger sample of feature like color
+#__patch
+def Background_histDetect(img_object_of,img_sample_mask):
+
+
+
+
+    """
+    # Otsu's thresholding after Gaussian filtering
+    cvtcolorImage = cv2.cvtColor(img_sample_mask,cv2.cv.CV_RGB2GRAY)
+    blur = cv2.GaussianBlur(cvtcolorImage,(1,1),0)
+    ret3,th3 = cv2.threshold(blur,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+
+    return th3
+    """
+
+
+    
+    hsv = cv2.cvtColor(img_sample_mask,cv2.COLOR_BGR2HSV)   
+ 
+    hsvt = cv2.cvtColor(img_object_of,cv2.COLOR_BGR2HSV)
+ 
+    # calculating object histogram
+    roihist = cv2.calcHist([hsv],[0, 1], None, [180, 256], [0, 180, 0, 256] )
+ 
+    # normalize histogram and apply backprojection
+    #cv2.normalize(roihist,roihist,0,255,cv2.NORM_MINMAX)
+    dst = cv2.calcBackProject([hsvt],[0,1],roihist,[0,180,0,256],1)
+ 
+    # Now convolute with circular disc
+    disc = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5))
+    cv2.filter2D(dst,-1,disc,dst)
+ 
+    # threshold and binary AND
+    ret,thresh = cv2.threshold(dst,60,255,0)
+    #invert to get the object of interest
+    #cv2.bitwise_not(thresh,thresh)
+    thresh = cv2.merge((thresh,thresh,thresh))
+    res = cv2.bitwise_and(img_object_of,thresh)
+ 
+    #res = np.vstack((target,thresh,res))
+    return res
 
 #_____________________Used in________________________________________________
 #__
@@ -240,5 +285,5 @@ def Background_operator_and (small, big, offset):
         array_buff[0:len(small)] = small
         res = array_buff * big
         return res
-        
-        
+
+   

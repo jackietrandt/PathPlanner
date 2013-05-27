@@ -1,6 +1,6 @@
 import sys
-import cv2.cv as cv
 import cv2
+import cv2.cv as cv
 import numpy as np
 import math
 from time import gmtime, strftime
@@ -52,6 +52,8 @@ Box_hw = {'x':0,
 
 Color = {'red':(0,0,255),
          'black':(0,0,0),
+         'green':(0,255,0),
+         'blue':(255,0,0),
          'white':(255,255,255)
          }
 
@@ -90,7 +92,7 @@ BackgroundSample['Box_bottom'] = Box_xy
 CutParam = {'Blade_1':1,            #Top blade
             'Strip_1':10,           #Top strip
             'Blade_2':1,            #Middle blade
-            'Strip_2':10,           #Bottom strip
+            'Strip_2':15,           #Bottom strip
             'Blade_3':1,            #Bottom blade
             'Good_threadhold':2,    #Number of defect feature counted, lower than or equal to this to count as good piece
             'Perfect_threadhold':0, #Number of defect feature counted, lower than or equal to this to count as perfect piece
@@ -189,7 +191,54 @@ def KeyFunc_Background_bottom(key,config,BackgroundSample):
         BackgroundSample['Bottom_border'] = BackgroundSample['Bottom_border'] - 2
     if key == KeyDictionary['key_up']:
         BackgroundSample['Bottom_border'] = BackgroundSample['Bottom_border'] + 2
-        
+
+#_____________________Used in________________________________________________
+#__PathFinderMain():
+#____________________________________________________________________________
+#__Illustrate the cut path on original image
+#__
+def Illustrate (image,position):
+    height, width, depth = image.shape
+    offset = position + CutParam['Blade_1']
+    pt1 = (0,offset)
+    pt2 = (width,offset)
+    cv2.line(image, pt1, pt2, Color['blue'],1)     
+    offset = offset + CutParam['Strip_1']
+    pt1 = (0,offset)
+    pt2 = (width,offset)
+    cv2.line(image, pt1, pt2, Color['blue'],1)     
+    offset = offset + CutParam['Blade_2']
+    pt1 = (0,offset)
+    pt2 = (width,offset)
+    cv2.line(image, pt1, pt2, Color['blue'],1)     
+    offset = offset + CutParam['Strip_2']
+    pt1 = (0,offset)
+    pt2 = (width,offset)
+    cv2.line(image, pt1, pt2, Color['blue'],1)     
+    #return image
+
+#_____________________Used in________________________________________________
+#__Not yet
+#____________________________________________________________________________
+#__Filled circle draw to use in histogram sampling
+#__
+def MyFilledCircle(img, center, radius):
+    thickness = -1
+    lineType = 8
+    cv2.circle(img, center, radius, Color['white'], thickness, lineType) 
+
+#_____________________Used in________________________________________________
+#__PathFinderMain():
+#____________________________________________________________________________
+#__Filled circle draw to use in histogram sampling
+#__
+def MyDraw_keypoints(vis, keypoints, radius):
+    color = Color['white']
+    for kp in keypoints:
+            x, y = kp.pt
+            cv2.circle(vis, (int(x), int(y)), radius, color,-1,8)
+
+
 # Class - Text box for putting in note and accept / reject the selected area.
 #_____________________________________________________________________________
 class Dialog(QtGui.QDialog):
@@ -203,6 +252,7 @@ def PathFinderMain():
     TrimParam = config.ConfigDictionary['TrimParam']
     BackgroundSample = config.ConfigDictionary['BackgroundSample']
     CutParam = config.ConfigDictionary['CutParam']
+    CutParam['Initialised'] = False
     print '_______________________________________________Run State_______________________________________________'
     print config.RunState
     #USB camera capture 
@@ -338,7 +388,7 @@ def PathFinderMain():
             Box_hw['w_old'] = Box_hw['w']
             Box_hw['h_old'] = Box_hw['h']
             img_object_of = bg.Background_extract_obj(img_trimmed_overlay, Box_hw)
-        bg.imshow ('object of interest',img_object_of,True) 
+        bg.imshow ('object of interest',img_object_of,False) 
 
         
         #_____________________________________________________________________
@@ -350,8 +400,40 @@ def PathFinderMain():
         tracked = tracker.track(img_object_of)        
         img_object_of_feature = img_object_of.copy()
         draw_keypoints(img_object_of_feature, tracker.frame_points)
-        bg.imshow ('feature',img_object_of_feature,True)
+        bg.imshow ('feature',img_object_of_feature,False)
         #_____________________________________________________________________
+
+        #___________________________Adaptive threadhold____________________________
+        #Detect feature on object of interest
+        
+        img_object_of_adaptive = cv2.cvtColor(img_object_of,cv2.cv.CV_RGB2GRAY)
+        img_object_of_adaptive_blur = cv2.medianBlur(img_object_of_adaptive,5)
+ 
+        #ret,th1 = cv2.threshold(img_object_of_adaptive_blur,127,255,cv2.THRESH_BINARY)
+        #th2 = cv2.adaptiveThreshold(img_object_of_adaptive_blur,255,cv2.ADAPTIVE_THRESH_MEAN_C,cv2.THRESH_BINARY,11,2)
+        th3 = cv2.adaptiveThreshold(img_object_of_adaptive_blur,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY,5,2)
+        th3 = cv2.medianBlur(th3,3)
+        #bg.imshow ('feature_threadhold_adaptive_1',th2,True)
+        bg.imshow ('feature_threadhold_adaptive_2',th3,True)
+        #_____________________________________________________________________
+        
+
+        #___________________________Sample color around detected feature____________________________
+        #Detect feature on object of interest
+        """
+        height, width, depth = img_object_of_feature.shape
+        img_feature_mask = np.zeros((height,width,depth),np.uint8)
+        MyDraw_keypoints(img_feature_mask, tracker.frame_points,5)
+        
+        
+        img_of_hist = img_object_of.copy()
+        img_of_hist = cv2.bitwise_and(img_of_hist,img_feature_mask)
+        img_extra_feature = bg.Background_histDetect(img_object_of, img_of_hist)
+        bg.imshow ('Feature Mask',img_of_hist,True)
+        bg.imshow ('Feature extra',img_extra_feature,True)
+        """
+        
+        #___________________________________________________________________________________________
         
         #___________________________y coor histogram____________________________
         #Detect feature on object of interest
@@ -418,7 +500,7 @@ def PathFinderMain():
         #print cut_band and hist
         #now we and them small and big across the band, result matrix then summed and put in the index
         #this section addressing dual strip perfect scenario
-        
+        """
         print 'hist = '
         print hist
         print 'cut band = '
@@ -427,17 +509,18 @@ def PathFinderMain():
         print cut_band_1
         print 'cut band 2 = '
         print cut_band_2
-        
+        """
         #for i in range(len(hist) + len(cut_band)*2):
         #    and_result = bg.Background_operator_and (cut_band, hist, i - len(cut_band))
             #print 'result = ',and_result 
         #    array_and_sum[i] = and_result.sum()
-        array_and_sum = [0]*(len(hist))
-        for i in range(len(hist)):
+        array_and_sum = [0]*(len(hist) - len(cut_band_pair))
+        for i in range(len(hist) - len(cut_band_pair)):
             and_result = bg.Background_operator_and (cut_band_pair, hist,i)
             #print 'result = ',and_result 
             array_and_sum[i] = and_result.sum()
         
+        """
         array_and_sum_1 = [0]*(len(hist))
         for i in range(len(hist)):
             and_result = bg.Background_operator_and (cut_band_1, hist,i)
@@ -450,19 +533,43 @@ def PathFinderMain():
             #print 'result = ',and_result 
             array_and_sum_2[i] = and_result.sum()
 
+        """
 
         print '_______________________________________________________________________'
         print 'array_and_sum '
         print array_and_sum
+        """
         print 'array_and_sum_1 '
         print array_and_sum_1
         print 'array_and_sum_2 '
         print array_and_sum_2
-         
+        """
+        
         #_____________________________________________________________________________________
         
         
+        #______________________________________Search cut line__________________________________________
+        cut_list = []
+        search_index = 0
+        while(search_index < len(array_and_sum)):
+            #implement of binary search
+            if (array_and_sum[search_index] == 0):
+                #illustrate cut line and note down the first cut reference position in a list
+                cut_list.append(search_index)
+                
+                #Jump to next possible pair and start searching for a possible cut slot
+                search_index = search_index + len(cut_band_pair)
+            else:
+                search_index = search_index + 1
+        print "Cut List________________"
+        print cut_list
+        #then we illustrate the cut slide 
+        for i in cut_list:
+            #img_object_of_feature = Illustrate (img_object_of_feature,i)
+            Illustrate (img_object_of_feature,i)
+        bg.imshow ('Illustrated',img_object_of_feature,True)
         
+        #_______________________________________________________________________________________________
         
         key = cv.WaitKey(2)
         #if key <> -1:
