@@ -80,8 +80,10 @@ def Background_Trim(img_original,TrimParam):
         #then set roi
         img_trimmed = np.zeros((y2 - y1,x2 - x1,depth),np.uint8)
         img_trimmed[0:y2-y1,0:x2-x1] = img_original[y1:y2,x1:x2]
-        
-    return img_trimmed
+        return img_trimmed
+    else:
+        return img_original
+    
 
 #_____________________Used in________________________________________________
 #__PathFinderMain():

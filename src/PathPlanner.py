@@ -2,6 +2,8 @@ import sys
 import cv2
 import cv2.cv as cv
 import numpy as np
+from numpy import matrix
+
 import math
 from time import gmtime, strftime
 
@@ -17,6 +19,7 @@ from mpl_toolkits.mplot3d import axes3d
 import matplotlib
 import matplotlib.pyplot as plt
 import pprint
+import timeit
 
 #________Program configuration option______
 ModeTest = True # set capture frame resolution 768 x 1024 ___or 1080 x 1920
@@ -273,8 +276,9 @@ def PathFinderMain():
         capture1.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 1080)
     
     gain_old = capture1.get(cv2.cv.CV_CAP_PROP_GAIN)
+    frame_counter = 1
     while True:
-        
+
         #check if gain cap changed
         gain_new = capture1.get(cv2.cv.CV_CAP_PROP_GAIN)
         if gain_new <> gain_old:
@@ -393,31 +397,74 @@ def PathFinderMain():
         
         #_____________________________________________________________________
         #img_trimmed_overlay_cv = cv.fromarray(img_trimmed_overlay)
+
+        #___________________________Trim object of interest before threshold____________________________
+        #Trim offset top and bottom of object of interest before threshold 
+        
+        TrimParam_of = {'left':0,
+             'right':0,
+             'top':3,
+             'bottom':6
+            }
+        
+        img_of_trimmed = bg.Background_Trim(img_object_of,TrimParam_of)
+        
+        #________________________________________________________________________________________________
         
         #___________________________Detect Feature____________________________
         #Detect feature on object of interest
         
-        tracked = tracker.track(img_object_of)        
-        img_object_of_feature = img_object_of.copy()
+        tracked = tracker.track(img_of_trimmed)        
+        img_object_of_feature = img_of_trimmed.copy()
         draw_keypoints(img_object_of_feature, tracker.frame_points)
         bg.imshow ('feature',img_object_of_feature,False)
         #_____________________________________________________________________
 
-        #___________________________Adaptive threadhold____________________________
-        #Detect feature on object of interest
+
         
-        img_object_of_adaptive = cv2.cvtColor(img_object_of,cv2.cv.CV_RGB2GRAY)
+        
+        
+        #___________________________Adaptive threshold____________________________
+        #Detect feature on object of interest using adaptive threshold 
+        
+        img_object_of_adaptive = cv2.cvtColor(img_of_trimmed,cv2.cv.CV_RGB2GRAY)
         img_object_of_adaptive_blur = cv2.medianBlur(img_object_of_adaptive,5)
  
         #ret,th1 = cv2.threshold(img_object_of_adaptive_blur,127,255,cv2.THRESH_BINARY)
         #th2 = cv2.adaptiveThreshold(img_object_of_adaptive_blur,255,cv2.ADAPTIVE_THRESH_MEAN_C,cv2.THRESH_BINARY,11,2)
-        th3 = cv2.adaptiveThreshold(img_object_of_adaptive_blur,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY,5,2)
+        th3 = cv2.adaptiveThreshold(img_object_of_adaptive_blur,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY_INV,5,2)
         th3 = cv2.medianBlur(th3,3)
+
         #bg.imshow ('feature_threadhold_adaptive_1',th2,True)
         bg.imshow ('feature_threadhold_adaptive_2',th3,True)
         #_____________________________________________________________________
         
+        #___________________________Histogram of dark area____________________________
+        height, width = th3.shape    
+        
+        #cv2.convertScaleAbs(th3,th3,1/255)
+        dark_feature_hist = th3.sum(axis = 1)
+        dark_feature_hist = np.divide(dark_feature_hist,255)
+        #Plot result if need
+        #plt.plot(dark_feature_hist)
+        #plt.show()
+        #There will be some noise from adaptive threadhold which need to be filter out
+        noise_offset = 10
+        list_offset = [noise_offset]*len(dark_feature_hist)
 
+        a = matrix(dark_feature_hist)
+        b = matrix(list_offset)
+        ret = a - b
+        #dark_feature_hist_offset = np.array(ret).reshape(-1,).tolist()
+        #dark_feature_hist_offset = ret
+        dark_feature_hist_offset = np.squeeze(np.asarray(ret))
+        n = 0
+        for i in dark_feature_hist_offset:
+            if (i <0):
+                dark_feature_hist_offset[n] = 0
+            n = n + 1
+        
+        #_____________________________________________________________________________
         #___________________________Sample color around detected feature____________________________
         #Detect feature on object of interest
         """
@@ -451,6 +498,19 @@ def PathFinderMain():
         #n, bins, patches = plt.hist(y_coor,bins=height,range=(0,height),normed=False,weights=None,cumulative=False,bottom=None,histtype='bar',align='mid',orientation='vertical',rwidth=None,log=False,color=None,label=None,stacked=False)
         bins = np.arange(height+1)
         hist, bin_edges = np.histogram(y_coor, bins)
+        #_______________________________________________________________________
+        
+        #__________________________________________combine 2 feature histogram_________________________________
+        #combine 2 feature histogram - with weight scale for line search
+        
+        a = matrix(dark_feature_hist_offset)
+        b = matrix(hist)
+        ret = a*1 + b*1
+        #dark_feature_hist_offset = np.array(ret).reshape(-1,).tolist()
+        #dark_feature_hist_offset = ret
+        hist_combine = np.squeeze(np.asarray(ret))
+        #print hist_combine
+        #______________________________________________________________________________________________________
         
         #______________________________________generate strip matrix__________________________
 
@@ -514,9 +574,9 @@ def PathFinderMain():
         #    and_result = bg.Background_operator_and (cut_band, hist, i - len(cut_band))
             #print 'result = ',and_result 
         #    array_and_sum[i] = and_result.sum()
-        array_and_sum = [0]*(len(hist) - len(cut_band_pair))
-        for i in range(len(hist) - len(cut_band_pair)):
-            and_result = bg.Background_operator_and (cut_band_pair, hist,i)
+        array_and_sum = [0]*(len(hist_combine) - len(cut_band_pair))
+        for i in range(len(hist_combine) - len(cut_band_pair)):
+            and_result = bg.Background_operator_and (cut_band_pair, hist_combine,i)
             #print 'result = ',and_result 
             array_and_sum[i] = and_result.sum()
         
@@ -535,9 +595,9 @@ def PathFinderMain():
 
         """
 
-        print '_______________________________________________________________________'
-        print 'array_and_sum '
-        print array_and_sum
+        #print '_______________________________________________________________________'
+        #print 'array_and_sum '
+        #print array_and_sum
         """
         print 'array_and_sum_1 '
         print array_and_sum_1
@@ -620,9 +680,6 @@ def PathFinderMain():
         if CameraDebugScreen:
             
             cv2.imshow("usbCam_1", img_trimmed_overlay)
-            
-            
-        
 
 # Main program where everything start
 #_____________________________________________________________________________
@@ -633,7 +690,9 @@ def main():
     print("Qt version = ", QT_VERSION_STR)
     print("Numpy version = ", np.version.version)
     print ("Matplotlib version = ",matplotlib.__version__)
+    print ("Line profiler = ",matplotlib.__version__)
     PathFinderMain()
+    param = True
  
 if __name__ == "__main__":
     main()
