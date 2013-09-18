@@ -9,7 +9,7 @@ import Background as bg
 import math
 import time
 from time import gmtime, strftime
-
+from scipy import ndimage
 from PyQt4 import QtCore, QtGui
 from PyQt4.QtCore import QT_VERSION_STR
 
@@ -35,10 +35,11 @@ class App:
         self.init_general_variable()
         self.init_threading_variable()
         #USB camera capture 
-        self.capture1 = cv2.VideoCapture(0)
+        self.capture1 = cv2.VideoCapture(1)
+        self.capture2 = cv2.VideoCapture(0)
     def init_debug_facility(self):
         #________Program configuration option______
-        self.ModeTest = False # set capture frame resolution 768 x 1024 ___or 1080 x 1920
+        self.ModeTest = True # set capture frame resolution 768 x 1024 ___or 1080 x 1920
         self.CameraDebugScreen = True #show raw capture from camera 1 and 2 for alignment and checking ___or disable at run mode
         self.ProcessDebug = False #show processed image in the middle
     def init_general_variable(self):
@@ -47,12 +48,23 @@ class App:
                          'key_down':2621440,
                          'key_left':2424832,
                          'key_right':2555904,
-                         'key_r':114,
-                         'key_d':100,
-                         'key_s':115,
-                         'key_t':116,
-                         'key_ctr_s':19,
-                         'key_tab':9
+                         'key_r':114, #reset trim parameter
+                         'key_d':100, #debug show image
+                         'key_s':115, #sample background image
+                         'key_t':116, #
+                         'key_f':102, #rotate clock wise cam 1
+                         'key_g':103, #rotate anti clock wise cam 1
+                         'key_h':104, #rotate clock wise cam 2
+                         'key_j':106, #rotate anti clock wise cam 2
+                         'key_k':107, #trim left more cam 2
+                         'key_l':108, #trim left less cam 2
+                         'key_v':118, #virtical up cam 2
+                         'key_b':98,  #virtical down cam 2
+                         'key_n':110,
+                         'key_m':109,
+                         'key_ctr_s':19, #Save trim parameter
+                         'key_ctr_r':18, #Reset cam 1 2 rotate and offset parameter
+                         'key_tab':9 #move between operational mode 
                          }
         #Generic box for object of interest detection
         self.Box_hw = {'x':0,
@@ -69,6 +81,7 @@ class App:
                  'black':(0,0,0),
                  'green':(0,255,0),
                  'blue':(255,0,0),
+                 'yellow':(0,255,255),
                  'white':(255,255,255)
                  }
     #Generic box xy
@@ -96,7 +109,11 @@ class App:
     TrimParam = {'left':0,
                  'right':0,
                  'top':0,
-                 'bottom':0
+                 'bottom':0,
+                 'angle_left':0,
+                 'angle_right':0,
+                 'trim_left_left':0,
+                 'off_virtical_left':0
                 }
     #_____________________Used in________________________________________________
     #__class Configuration(object):
@@ -174,26 +191,57 @@ class App:
             print 'Run state = ',self.RunState['KeySelect'][self.RunState['KeySelectIndex']]
         def GetRunState(self):
             return self.RunState['KeySelect'][self.RunState['KeySelectIndex']]
-    def KeyFunc_TrimArea(self,key,config,TrimParam):
+    def KeyFunc_TrimArea(self,key,config):
     #_____________________Used in________________________________________________
     #__PathFinderMain():
     #____________________________________________________________________________
     #__Handle keyboard short cut to change trim area
     #__
-
+        
         if key == self.KeyDictionary['key_up']:
-            TrimParam['bottom'] = TrimParam['bottom'] + 2
+            self.TrimParam['bottom'] = self.TrimParam['bottom'] + 2
         if key == self.KeyDictionary['key_down']:
-            TrimParam['top'] = TrimParam['top'] + 2
+            self.TrimParam['top'] = self.TrimParam['top'] + 2
         if key == self.KeyDictionary['key_left']:
-            TrimParam['left'] = TrimParam['left'] + 2
+            self.TrimParam['left'] = self.TrimParam['left'] + 2
         if key == self.KeyDictionary['key_right']:
-            TrimParam['right'] = TrimParam['right'] + 2
+            self.TrimParam['right'] = self.TrimParam['right'] + 2
         if key == self.KeyDictionary['key_r']:
-            TrimParam['right'] = 0
-            TrimParam['left'] = 0
-            TrimParam['top'] = 0
-            TrimParam['bottom'] = 0
+            self.TrimParam['right'] = 0
+            self.TrimParam['left'] = 0
+            self.TrimParam['top'] = 0
+            self.TrimParam['bottom'] = 0
+        #Next section is for dual cam merge and rotate 
+        if key == self.KeyDictionary['key_ctr_r']:
+            self.TrimParam['angle_left'] = 0
+            self.TrimParam['angle_right'] = 0
+            self.TrimParam['trim_left_left'] = 0
+            self.TrimParam['off_virtical_left'] = 0
+        if key == self.KeyDictionary['key_f']:
+            self.TrimParam['angle_left'] = self.TrimParam['angle_left'] + 0.1
+        if key == self.KeyDictionary['key_g']:
+            if self.TrimParam['angle_left'] > 0:
+                self.TrimParam['angle_left'] = self.TrimParam['angle_left'] - 0.1
+        #----
+        if key == self.KeyDictionary['key_h']:
+            self.TrimParam['angle_right'] = self.TrimParam['angle_right'] + 0.1
+        if key == self.KeyDictionary['key_j']:
+            if self.TrimParam['angle_right'] > 0:
+                self.TrimParam['angle_right'] = self.TrimParam['angle_right'] - 0.1
+        #----
+        if key == self.KeyDictionary['key_k']:
+            self.TrimParam['trim_left_left'] = self.TrimParam['trim_left_left'] + 1
+        if key == self.KeyDictionary['key_l']:
+            if self.TrimParam['trim_left_left'] > 0:
+                self.TrimParam['trim_left_left'] = self.TrimParam['trim_left_left'] - 1
+        #-----
+        if key == self.KeyDictionary['key_v']:
+            self.TrimParam['off_virtical_left'] = self.TrimParam['off_virtical_left'] + 1
+        if key == self.KeyDictionary['key_b']:
+            if self.TrimParam['off_virtical_left'] > 0:
+                self.TrimParam['off_virtical_left'] = self.TrimParam['off_virtical_left'] - 1
+
+
 
     def KeyFunc_Background_top(self,key,config,BackgroundSample):
     #_____________________Used in________________________________________________
@@ -227,19 +275,19 @@ class App:
         offset = position + self.CutParam['Blade_1']
         pt1 = (0,offset)
         pt2 = (width,offset)
-        cv2.line(image, pt1, pt2, self.Color['blue'],1)     
+        cv2.line(image, pt1, pt2, self.Color['yellow'],1)     
         offset = offset + self.CutParam['Strip_1']
         pt1 = (0,offset)
         pt2 = (width,offset)
-        cv2.line(image, pt1, pt2, self.Color['blue'],1)     
+        cv2.line(image, pt1, pt2, self.Color['yellow'],1)     
         offset = offset + self.CutParam['Blade_2']
         pt1 = (0,offset)
         pt2 = (width,offset)
-        cv2.line(image, pt1, pt2, self.Color['blue'],1)     
+        cv2.line(image, pt1, pt2, self.Color['yellow'],1)     
         offset = offset + self.CutParam['Strip_2']
         pt1 = (0,offset)
         pt2 = (width,offset)
-        cv2.line(image, pt1, pt2, self.Color['blue'],1)     
+        cv2.line(image, pt1, pt2, self.Color['yellow'],1)     
 
     def MyFilledCircle(self,img, center, radius):
     #_____________________Used in________________________________________________
@@ -330,6 +378,27 @@ class App:
             cluster.append(i)
         yield cluster           # yield the last cluster
 
+
+    """This read image from 2 camera then merge them into 1 image, camera 0 will be on the left and 1 will be on the right """
+    def merge_2cam(self):
+        flas,img1 = self.capture1.read()
+        flas,img2 = self.capture2.read()
+        img2 = ndimage.rotate(img2, self.TrimParam['angle_right'])
+        img1 = ndimage.rotate(img1, self.TrimParam['angle_left'])
+   
+        #__Merge__create a holder of the merged image from camera capture 1 and 2
+        height, width, depth = img1.shape
+        height2, width2, depth = img2.shape
+        master_width = width*2 + 60
+        img_Master = np.zeros((height + 60,master_width,depth),np.uint8)
+
+        #__Merge__copy camera 0 ,1 image over master holder
+        
+        img_Master[0:height,0:width-10] = img1[0:height,0:width-10]
+        img_Master[0:height2-self.TrimParam['off_virtical_left'],width-10:width-10+width2-self.TrimParam['trim_left_left']] = img2[self.TrimParam['off_virtical_left']:height2,self.TrimParam['trim_left_left']:width2]
+
+        return img_Master
+
     def Camera_Monitoring(self):
         gain_old = self.capture1.get(cv2.cv.CV_CAP_PROP_GAIN)
         #check if gain cap changed
@@ -345,7 +414,7 @@ class App:
     def PathFinderMain(self):
         config = self.Configuration()
         config.read()
-        TrimParam = config.ConfigDictionary['TrimParam']
+        self.TrimParam = config.ConfigDictionary['TrimParam']
         BackgroundSample = config.ConfigDictionary['BackgroundSample']
         CutParam = config.ConfigDictionary['CutParam']
         CutParam['Initialised'] = False
@@ -356,22 +425,29 @@ class App:
     
         #Configure capture screen resolution
         if self.ModeTest:
-            self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1024)
-            self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 768)
+           # self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1024)
+           # self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 768)
+           # self.capture2.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1024)
+           # self.capture2.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 768)
+            self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 640)
+            self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 480)
+            self.capture2.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 640)
+            self.capture2.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 480)
         else:
             self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1920)
             self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 1080)
+            self.capture2.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1920)
+            self.capture2.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 1080)
         self.Init_CutBand()
         #put it in trim mode first , to initialise other parameter before run
         config.RunStateUpdate()
     
         while True:
-            #print 'CV_CAP_PROP_AUTO_EXPOSURE = ',capture1.get(cv2.cv.CV_CAP_PROP_AUTO_EXPOSURE)
-            #img = cv.QueryFrame(capture)
-            flas,img1 = self.capture1.read()
+
+            img1 = self.merge_2cam()
             #flas,img2 = capture2.read()
             
-            img_trimmed = bg.Background_Trim(img1,TrimParam)
+            img_trimmed = bg.Background_Trim(img1,self.TrimParam)
             img_trimmed_overlay = img_trimmed.copy()
     
             if config.GetRunState() == 'Operational':
@@ -605,8 +681,8 @@ class App:
             else:
                 cv2.imshow('Trimmed',img_trimmed)
             key = cv.WaitKey(2)
-            #if key <> -1:
-            #    print key
+            if key <> -1:
+                print key
             if key == 27:
                 self.event.set()
                 break
@@ -616,7 +692,7 @@ class App:
                     print 'Process Debug Screen = ', self.ProcessDebug
             #Let save the configuration to file
             if key == self.KeyDictionary['key_ctr_s']:
-                config.ConfigDictionary['TrimParam'] = TrimParam
+                config.ConfigDictionary['TrimParam'] = self.TrimParam
                 config.ConfigDictionary['BackgroundSample'] = BackgroundSample 
                 config.write()
             #Change KeySelect function mode
@@ -628,7 +704,7 @@ class App:
                 cv2.imwrite(config.Internal['Background_sample_path'], img_background_sample) 
                 cv2.imshow("Sampled", img_background_sample)
             if config.GetRunState() == 'TrimArea':
-                self.KeyFunc_TrimArea(key,config,TrimParam)
+                self.KeyFunc_TrimArea(key,config)
             #Edit limit of background sample box on top
             if config.GetRunState() == 'Background_top':
                 self.KeyFunc_Background_top(key,config,BackgroundSample)
