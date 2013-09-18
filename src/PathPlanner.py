@@ -5,6 +5,8 @@ import numpy as np
 from numpy import matrix
 import threading
 import Background as bg
+#for scanning com port
+import serial
 
 import math
 import time
@@ -29,14 +31,84 @@ import Queue
 #from sklearn import cluster, datasets
 from math import sqrt
 
+#---------------------------------------------------------------------------# 
+# modbus serial com 
+#---------------------------------------------------------------------------# 
+from pymodbus.client.sync import ModbusSerialClient as ModbusClient
+import time
+import logging
+
+
+
+# Class - Modbus class and object
+#_____________________________________________________________________________
+class Com_Modbus:
+    def __init__(self):
+        logging.basicConfig()
+        log = logging.getLogger()
+        log.setLevel(logging.DEBUG)
+        
+        #scan all available com port
+        port_list = self.scan()
+        print "Found ports:"
+        for n,s in port_list: print "____(%d) %s" % (n,s)
+        
+        self.client = ModbusClient(method='ascii', port=s, baudrate='115200', timeout=1)
+        print "Init Modbus Comm = ",self.client
+        pass
+    
+    #Scan all available com port on this machine
+    def scan(self):
+       # scan for available ports. return a list of tuples (num, name)
+        available = []
+        for i in range(256):
+            try:
+                s = serial.Serial(i)
+                available.append( (i, s.portstr))
+                s.close()
+            except serial.SerialException:
+                pass
+
+        return available
+
+    def D_AddressRef(self,d_Address):
+    #---------------------------------------------------------------------------# 
+    # D_AddressRef
+    #---------------------------------------------------------------------------# 
+    #Input address in decimal - then function would convert it to PLC address
+    #Address 0x1000 stand for D register in PLC
+    #Address 0x0258 stand for 600 in decimal
+    #So to write to D600 register in the PLC
+    #The reference address is 0x1258
+        d_Working = 4096
+        d_Working = d_Working + d_Address
+        return d_Working
+    #_____________________________________________________________________________#
+    # Usage example
+    #_____________________________________________________________________________#
+    #client.write_register(D_AddressRef(600), 123, unit=2 ) #unit=2 : mean PLC server address = 2
+    #    def write_register(self, address, value, **kwargs): // Extracted from pymodbus\client\common.py
+    #        '''
+    #        :param address: The starting address to write to
+    #        :param value: The value to write to the specified address
+    #        :param unit: The slave unit this request is targeting
+    #        :returns: A deferred response handle
+
+
+# Class - Application and core functionality
+#_____________________________________________________________________________
+
 class App:
     def __init__(self, param):
         self.init_debug_facility()
         self.init_general_variable()
         self.init_threading_variable()
         #USB camera capture 
-        self.capture1 = cv2.VideoCapture(1)
+        
         self.capture2 = cv2.VideoCapture(0)
+        self.capture1 = cv2.VideoCapture(1)
+        print 'Camera 1 is openned = ',self.capture1.isOpened()
+        print 'Camera 2 is openned = ',self.capture2.isOpened()
     def init_debug_facility(self):
         #________Program configuration option______
         self.ModeTest = True # set capture frame resolution 768 x 1024 ___or 1080 x 1920
@@ -64,7 +136,8 @@ class App:
                          'key_m':109,
                          'key_ctr_s':19, #Save trim parameter
                          'key_ctr_r':18, #Reset cam 1 2 rotate and offset parameter
-                         'key_tab':9 #move between operational mode 
+                         'key_tab':9, #move between operational mode
+                         'key_esc':27 #stop all program and terminate thread 
                          }
         #Generic box for object of interest detection
         self.Box_hw = {'x':0,
@@ -240,9 +313,6 @@ class App:
         if key == self.KeyDictionary['key_b']:
             if self.TrimParam['off_virtical_left'] > 0:
                 self.TrimParam['off_virtical_left'] = self.TrimParam['off_virtical_left'] - 1
-
-
-
     def KeyFunc_Background_top(self,key,config,BackgroundSample):
     #_____________________Used in________________________________________________
     #__PathFinderMain():
@@ -381,8 +451,9 @@ class App:
 
     """This read image from 2 camera then merge them into 1 image, camera 0 will be on the left and 1 will be on the right """
     def merge_2cam(self):
-        flas,img1 = self.capture1.read()
-        flas,img2 = self.capture2.read()
+        flas1,img1 = self.capture1.read()
+        flas2,img2 = self.capture2.read()
+
         img2 = ndimage.rotate(img2, self.TrimParam['angle_right'])
         img1 = ndimage.rotate(img1, self.TrimParam['angle_left'])
    
@@ -401,6 +472,7 @@ class App:
 
     def Camera_Monitoring(self):
         gain_old = self.capture1.get(cv2.cv.CV_CAP_PROP_GAIN)
+        gain_old_2 = self.capture2.get(cv2.cv.CV_CAP_PROP_GAIN)
         #check if gain cap changed
         while True:
             time.sleep(10)
@@ -441,7 +513,6 @@ class App:
         self.Init_CutBand()
         #put it in trim mode first , to initialise other parameter before run
         config.RunStateUpdate()
-    
         while True:
 
             img1 = self.merge_2cam()
@@ -681,9 +752,9 @@ class App:
             else:
                 cv2.imshow('Trimmed',img_trimmed)
             key = cv.WaitKey(2)
-            if key <> -1:
-                print key
-            if key == 27:
+            #if key <> -1:
+                #print key
+            if key == self.KeyDictionary['key_esc']:
                 self.event.set()
                 break
             if key == self.KeyDictionary['key_d']:
@@ -758,25 +829,25 @@ class App:
     def close_program(self):
         for each_thread in self.threads:
             each_thread.stop()
-            
+        self.capture1.release()
+        self.capture2.release()
+        del self.capture1
+        del self.capture2
+        
         pass
 
 
 # Class - Text box for putting in note and accept / reject the selected area.
 #_____________________________________________________________________________
-
-
 class Dialog(QtGui.QDialog):
     def __init__(self):
         super(Dialog, self).__init__()
-
-
-
 
 # Main program where everything start
 #_____________________________________________________________________________
  
 def main():
+
     print ("Python version = ",sys.version)
     print ("Opencv version = ",cv.__version__)
     print("Qt version = ", QT_VERSION_STR)
@@ -785,7 +856,7 @@ def main():
     print ("Line profiler = ",matplotlib.__version__)
     param = True
     application = App(param)
-    
+    Modbus_Client = Com_Modbus()
     try:
         #Class for Camera Gain monitor
         class myThread_1 (threading.Thread):
