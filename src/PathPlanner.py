@@ -99,12 +99,25 @@ class Com_Modbus:
         
         self.client.write_register(self.D_AddressRef(address), data, unit = 1 )
         pass
-    def Read_register(self,address,length):
+    #read back single register
+    def Read_register(self,address):
+        #read_coils(address, count=1, unit=0)
+        register_read = self.client.read_holding_registers(self.D_AddressRef(address),1, unit = 1)
+        
+        if register_read.registers[0] <> None:
+            return register_read.registers[0]
+        else:
+            return None
+        pass
+    #read back multiple register
+    def Read_register_multi(self,address,length):
         #read_coils(address, count=1, unit=0)
         register_read = self.client.read_holding_registers(self.D_AddressRef(address),length, unit = 1)
         print register_read.registers[0]
+        
         return register_read
         pass
+
 # Class - Application and core functionality
 #_____________________________________________________________________________
 
@@ -820,7 +833,7 @@ class App:
             readfrom_Address = readfrom_Address + 1
             #test comm
             self.Modbus_Client.Send_register(10, 0x1234)
-            result_read = self.Modbus_Client.Read_register(10,10)
+            result_read = self.Modbus_Client.Read_register(10)
             print result_read
             
             #print "Read from address = ",readfrom_Address
