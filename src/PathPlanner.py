@@ -47,17 +47,18 @@ class Com_Modbus:
         logging.basicConfig()
         log = logging.getLogger()
         log.setLevel(logging.DEBUG)
-        
+
         #scan all available com port
         port_list = self.scan()
+        s = None
         print "Found ports:"
         for n,s in port_list: print "____(%d) %s" % (n,s)
-        
-        self.client = ModbusClient(method='ascii', port=s, baudrate='115200', timeout=1)
-        print "Init Modbus Comm = ",self.client
-        pass
-    
-    #Scan all available com port on this machine
+        if s <> None:
+            self.client = ModbusClient(method='ascii', port=s, stopbits = 1, parity = 'E', bytesize = 7, baudrate='9600', timeout=1)
+            connect = self.client.connect()
+            print "Com is connected =",connect
+            print "Init Modbus Comm = ",self.client    
+    #Scan all available com port on this machine - return list of connected usb com port
     def scan(self):
        # scan for available ports. return a list of tuples (num, name)
         available = []
@@ -93,8 +94,17 @@ class Com_Modbus:
     #        :param value: The value to write to the specified address
     #        :param unit: The slave unit this request is targeting
     #        :returns: A deferred response handle
-
-
+    
+    def Send_register(self,address,data):
+        
+        self.client.write_register(self.D_AddressRef(address), data, unit = 1 )
+        pass
+    def Read_register(self,address,length):
+        #read_coils(address, count=1, unit=0)
+        register_read = self.client.read_holding_registers(self.D_AddressRef(address),length, unit = 1)
+        print register_read.registers[0]
+        return register_read
+        pass
 # Class - Application and core functionality
 #_____________________________________________________________________________
 
@@ -115,6 +125,8 @@ class App:
         self.CameraDebugScreen = True #show raw capture from camera 1 and 2 for alignment and checking ___or disable at run mode
         self.ProcessDebug = False #show processed image in the middle
     def init_general_variable(self):
+        #init a modbus client for sending out result 
+        self.Modbus_Client = Com_Modbus()
         #Share generic dictionary which used across functions
         self.KeyDictionary = {'key_up':2490368,
                          'key_down':2621440,
@@ -157,6 +169,8 @@ class App:
                  'yellow':(0,255,255),
                  'white':(255,255,255)
                  }
+        #camera readiness
+        self.camera_ready = False
     #Generic box xy
     def init_threading_variable(self):
         #hold list of executing thread
@@ -247,7 +261,7 @@ class App:
             except RuntimeError:
                 print 'Config\config.ini _______ File not found'
             else:
-                print 'Config\config.ini _______ File not found'
+                print 'Config\config.ini _______ File loaded'
                 #pass # does nothing
             if s <> '':
                 self.ConfigDictionary = eval(s)
@@ -334,7 +348,7 @@ class App:
             BackgroundSample['Bottom_border'] = BackgroundSample['Bottom_border'] - 2
         if key == self.KeyDictionary['key_up']:
             BackgroundSample['Bottom_border'] = BackgroundSample['Bottom_border'] + 2
-
+    #illustrate found cut path on display image fo GUI
     def Illustrate(self,image,position):
     #_____________________Used in________________________________________________
     #__PathFinderMain():
@@ -451,9 +465,14 @@ class App:
 
     """This read image from 2 camera then merge them into 1 image, camera 0 will be on the left and 1 will be on the right """
     def merge_2cam(self):
+        if self.camera_ready == False:
+            self.camera_ready = not ( self.capture1.isOpened() and self.capture2.isOpened()) 
+        while self.camera_ready:
+            print "Initialising USB camera"
+            t = cv.WaitKey(100)
+            pass
         flas1,img1 = self.capture1.read()
         flas2,img2 = self.capture2.read()
-
         img2 = ndimage.rotate(img2, self.TrimParam['angle_right'])
         img1 = ndimage.rotate(img1, self.TrimParam['angle_left'])
    
@@ -794,8 +813,17 @@ class App:
             if self.CameraDebugScreen:
                 bg.imshow ('Camera 1',img1,self.ProcessDebug)    
     def MachineLearning(self):
+        readfrom_Address = 1
         while True:
+            
             self.queueLock_work.acquire()
+            readfrom_Address = readfrom_Address + 1
+            #test comm
+            self.Modbus_Client.Send_register(10, 0x1234)
+            result_read = self.Modbus_Client.Read_register(10,10)
+            print result_read
+            
+            #print "Read from address = ",readfrom_Address
             #if we have enough sample in the queue then we use machine learning to seperate grouped cut
             if self.workQueue.full():
                 data = []
@@ -809,6 +837,7 @@ class App:
                     result.append(sum(cluster)/len(cluster))
                     print (cluster)
                 print ('result = ',result)
+            self.Modbus_Client
             self.queueLock_work.release()
             """
             >>> import numpy as np
@@ -826,6 +855,7 @@ class App:
         pass
     def run(self):
         pass
+    #terminate all thread, close camera capture and delete the camera capture for futher useage
     def close_program(self):
         for each_thread in self.threads:
             each_thread.stop()
@@ -856,7 +886,7 @@ def main():
     print ("Line profiler = ",matplotlib.__version__)
     param = True
     application = App(param)
-    Modbus_Client = Com_Modbus()
+    
     try:
         #Class for Camera Gain monitor
         class myThread_1 (threading.Thread):
