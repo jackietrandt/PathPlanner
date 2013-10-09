@@ -58,7 +58,8 @@ class Com_Modbus:
             connect = self.client.connect()
             print "Com is connected =",connect
             print "Init Modbus Comm = ",self.client    
-            self.ComState = 0;
+            
+            
     #Scan all available com port on this machine - return list of connected usb com port
     def scan(self):
        # scan for available ports. return a list of tuples (num, name)
@@ -105,7 +106,7 @@ class Com_Modbus:
         #read_coils(address, count=1, unit=0)
         register_read = self.client.read_holding_registers(self.D_AddressRef(address),1, unit = 1)
         
-        if register_read.registers[0] <> None:
+        if register_read <> None:
             return register_read.registers[0]
         else:
             return None
@@ -119,10 +120,9 @@ class Com_Modbus:
         return register_read
         pass
     
-    #State machine for comm with PLC
-    def Com_State(self):
-        
-        pass
+
+
+
 # Class - Application and core functionality
 #_____________________________________________________________________________
 
@@ -145,6 +145,7 @@ class App:
     def init_general_variable(self):
         #init a modbus client for sending out result 
         self.Modbus_Client = Com_Modbus()
+        self.ComState = 10
         #Share generic dictionary which used across functions
         self.KeyDictionary = {'key_up':2490368,
                          'key_down':2621440,
@@ -218,7 +219,8 @@ class App:
                  'angle_left':0,
                  'angle_right':0,
                  'trim_left_left':0,
-                 'off_virtical_left':0
+                 'off_virtical_left':0,
+                 'cam_2_bright':0
                 }
     #_____________________Used in________________________________________________
     #__class Configuration(object):
@@ -345,6 +347,15 @@ class App:
         if key == self.KeyDictionary['key_b']:
             if self.TrimParam['off_virtical_left'] > 0:
                 self.TrimParam['off_virtical_left'] = self.TrimParam['off_virtical_left'] - 1
+        #Next section is for dual camera brighness
+        if key == self.KeyDictionary['key_n']:
+            self.TrimParam['cam_2_bright'] = self.TrimParam['cam_2_bright'] + 1.0 
+            self.capture2.set(cv2.cv.CV_CAP_PROP_BRIGHTNESS, self.TrimParam['cam_2_bright'])
+            print 'Brighness cam 2 = ', self.capture2.get(cv2.cv.CV_CAP_PROP_BRIGHTNESS)
+        if key == self.KeyDictionary['key_m']:
+            self.TrimParam['cam_2_bright'] = self.TrimParam['cam_2_bright'] - 1.0
+            self.capture2.set(cv2.cv.CV_CAP_PROP_BRIGHTNESS, self.TrimParam['cam_2_bright'])
+            print 'Brighness cam 2 = ', self.capture2.get(cv2.cv.CV_CAP_PROP_BRIGHTNESS)
     def KeyFunc_Background_top(self,key,config,BackgroundSample):
     #_____________________Used in________________________________________________
     #__PathFinderMain():
@@ -728,7 +739,7 @@ class App:
                     x, y = kp.pt
                     x_coor.append(int(x))
                     y_coor.append(int(y))
-                #print y_coor
+                print y_coor
                 #work out histogram 
                 #n, bins, patches = plt.hist(y_coor,bins=height,range=(0,height),normed=False,weights=None,cumulative=False,bottom=None,histtype='bar',align='mid',orientation='vertical',rwidth=None,log=False,color=None,label=None,stacked=False)
                 bins = np.arange(height+1)
@@ -759,10 +770,14 @@ class App:
                 
                 #______________________________________Search cut line__________________________________________
                 cut_list = []
+                search_sum = 0
+                sum_list = []
                 search_index = 0
                 while(search_index < len(array_and_sum)):
                     #implement of binary search
-                    if (array_and_sum[search_index] == 0):
+                    search_sum = array_and_sum[search_index] 
+                    sum_list.append(search_sum)
+                    if (search_sum == 0):
                         #illustrate cut line and note down the first cut reference position in a list
                         cut_list.append(search_index)
                         
@@ -770,6 +785,14 @@ class App:
                         search_index = search_index + len(self.cut_band_pair)
                     else:
                         search_index = search_index + 1
+                #Check cut list to see if found a cut path / if there are some defect, chose the minimum defect cut path
+                if len(cut_list) ==0 :
+                    #Search for minimum of the sum list
+                    min_sum = min(sum_list)
+                    position_min = sum_list.index(min_sum)
+                    #print 'min sum = ',min_sum
+                    #print 'position = ',position_min
+                    cut_list.append(position_min)
                 #Append new cut list into thread queue for processing in machine learning thread
                 self.queueLock_work.acquire()
                 for cut_location in cut_list:
@@ -831,46 +854,85 @@ class App:
             if self.CameraDebugScreen:
                 bg.imshow ('Camera 1',img1,self.ProcessDebug)    
     def MachineLearning(self):
-        readfrom_Address = 1
         while True:
-            
+            #debug variable
+            old_comstate = self.ComState
             self.queueLock_work.acquire()
-            readfrom_Address = readfrom_Address + 1
+            
             #test comm
-            self.Modbus_Client.Send_register(10, 0x1234)
-            result_read = self.Modbus_Client.Read_register(10)
-            print result_read
+            #self.Modbus_Client.Send_register(10, 0x1234)
+            #result_read = self.Modbus_Client.Read_register(10)
+            #test comm end
+            
             #______________state machine for comm with PLC____________
             #
-            # State 0 : PLC -> PC : D600 - code 1 - Wood board in place, movement is stopped and ready for scan
-            # State 1 : PC -> PLC : D602 - code 11 - Scanning finished
-            # State 2 : PC -> PLC : D604 - cut coordination
-            # State 3 : PC -> PLC : D602 - code 12 - Result transfer completed
-            # State 4 : PLC -> PC : D600 - code 2 - Reading is done
+            # State 1 : PLC -> PC : D600 - code 1  - Wood board in place, movement is stopped and ready for scan
+            # State 2 : PC -> PLC : D604 - result cut coordination
+            # State 3 : PC -> PLC : D602 - code 11 - Scanning finished and result is in D604
+            # State 4 : PLC -> PC : D600 - code 2  - Reading is done
             # State 5 : PC -> PLC : D602 - code 10 - Comm idle ready for next set
             #                       D604 - 0
             
-            # State 0 : Empty the sample queue
-            #           Wait till it full
-            #           Calc the result - then move to state 1
-            
-            #print "Read from address = ",readfrom_Address
-            #if we have enough sample in the queue then we use machine learning to seperate grouped cut
-            if self.workQueue.full():
+            # State 1 :______________________________________________________________
+            if self.ComState == 10:
+                #read D600
+                result_read = self.Modbus_Client.Read_register(0)
+                if result_read == 1:
+                    self.ComState = 20
+            # State 2 :______________________________________________________________ 
+            elif self.ComState == 20:
+                #empty the sample queue
                 data = []
-                result = []
                 while not self.workQueue.empty():
                     data.append(self.workQueue.get())
-                data = sorted(data)
-                print "__________________________________________Clustered sample __________________________________________"
-                after_parse = self.parse(data, 7)
-                for cluster in after_parse:
-                    result.append(sum(cluster)/len(cluster))
-                    print (cluster)
-                print ('result = ',result)
+                self.ComState = 21
+            elif self.ComState == 21:
+                #check if the sample queue is full then calc the result
+                #if we have enough sample in the queue then we use machine learning to seperate grouped cut
+                if self.workQueue.full():
+                    data = []
+                    result = []
+                    while not self.workQueue.empty():
+                        data.append(self.workQueue.get())
+                    data = sorted(data)
+                    print "__________________________________________Clustered sample __________________________________________"
+                    after_parse = self.parse(data, 7)
+                    for cluster in after_parse:
+                        result.append(sum(cluster)/len(cluster))
+                        print (cluster)
+                    #found the result
+                    print ('result = ',result)
+                    #send result to D604
+                    if result[0] != None:
+                        self.Modbus_Client.Send_register(4, result[0])
+                    else:
+                        #Send default cut position if none of the cut line found
+                        self.Modbus_Client.Send_register(4, 50)
+                    #next state
+                    self.ComState = 30
+            # State 3 :______________________________________________________________
+            elif self.Modbus_Client.ComState == 30:
+                #scan complete, result is written at target PLC
+                self.Modbus_Client.Send_register(2, 11)
+                self.ComState = 40
+            # State 4 :______________________________________________________________
+            elif self.ComState == 40:
+                result_read = self.Modbus_Client.Read_register(0)
+                #reading is done on PLC - go to idle waiting mode
+                if result_read == 2:
+                    self.Modbus_Client.Send_register(2, 10)
+                    self.Modbus_Client.Send_register(0, 0)
+                    self.ComState = 10
             
+            #print out little debug message for com state
+            #print 'Current com state = ',self.ComState
+            if old_comstate <> self.ComState:
+                print 'Com State = ',self.ComState
             self.queueLock_work.release()
+            
             """
+
+            
             >>> import numpy as np
             >>> from scipy.cluster.vq import kmeans, vq
             >>> y = np.array([1,2,3,60,70,80,100,220,230,250])
