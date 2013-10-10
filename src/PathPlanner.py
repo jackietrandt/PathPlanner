@@ -146,6 +146,9 @@ class App:
         #init a modbus client for sending out result 
         self.Modbus_Client = Com_Modbus()
         self.ComState = 10
+        #optical scaling from pixel count to mm
+        # 1 pixal  = 1.25mm - this need to measure and change with different screen resolution
+        self.mmPerPixal = 1.25
         #Share generic dictionary which used across functions
         self.KeyDictionary = {'key_up':2490368,
                          'key_down':2621440,
@@ -198,7 +201,8 @@ class App:
         #holding queue for passing object across thread
         self.queueLock_work = threading.Lock()
         self.queueLock_result = threading.Lock()
-        self.workQueue = Queue.Queue(20)
+        self.workQueue_len = 4
+        self.workQueue = Queue.Queue(self.workQueue_len)
         self.resultQueue = Queue.Queue(10)
         pass
     Box_xy = {'x1':0,
@@ -243,9 +247,9 @@ class App:
     #__used on x coordination histogram to figure out which cut path to take
     #__All dimension is in 1 mm
     CutParam = {'Blade_1':1,            #Top blade
-                'Strip_1':10,           #Top strip
+                'Strip_1':13,           #Top strip
                 'Blade_2':1,            #Middle blade
-                'Strip_2':15,           #Bottom strip
+                'Strip_2':13,           #Bottom strip
                 'Blade_3':1,            #Bottom blade
                 'Good_threadhold':2,    #Number of defect feature counted, lower than or equal to this to count as good piece
                 'Perfect_threadhold':0, #Number of defect feature counted, lower than or equal to this to count as perfect piece
@@ -495,11 +499,8 @@ class App:
     """This read image from 2 camera then merge them into 1 image, camera 0 will be on the left and 1 will be on the right """
     def merge_2cam(self):
         if self.camera_ready == False:
-            self.camera_ready = not ( self.capture1.isOpened() and self.capture2.isOpened()) 
-        while self.camera_ready:
-            print "Initialising USB camera"
-            t = cv.WaitKey(100)
-            pass
+            self.camera_ready = self.capture1.isOpened() and self.capture2.isOpened() 
+            t = cv.WaitKey(1000)
         flas1,img1 = self.capture1.read()
         flas2,img2 = self.capture2.read()
         img2 = ndimage.rotate(img2, self.TrimParam['angle_right'])
@@ -545,14 +546,21 @@ class App:
     
         #Configure capture screen resolution
         if self.ModeTest:
-           # self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1024)
-           # self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 768)
-           # self.capture2.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1024)
-           # self.capture2.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 768)
-            self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 640)
-            self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 480)
-            self.capture2.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 640)
-            self.capture2.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 480)
+            #self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1920)
+            #self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 1080)
+            #self.capture2.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1920)
+            #self.capture2.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 1080)
+            self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1024)
+            self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 768)
+            self.capture2.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1024)
+            self.capture2.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 768)
+            #self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 640)
+            #self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 480)
+            #self.capture2.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 640)
+            #self.capture2.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 480)
+            pass
+            
+            
         else:
             self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1920)
             self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT, 1080)
@@ -568,7 +576,7 @@ class App:
             
             img_trimmed = bg.Background_Trim(img1,self.TrimParam)
             img_trimmed_overlay = img_trimmed.copy()
-    
+            
             if config.GetRunState() == 'Operational':
                 #___________________________Smooth___________________________
                 #img_trimmed = bg.Background_k_mean(img_trimmed)
@@ -587,6 +595,7 @@ class App:
                 #
                 #Draw a black rectangular around the trimmed image to help with Canny close loop
                 height, width, depth = img_trimmed.shape
+                
                 cv2.rectangle(img_trimmed, (0,0), (width,height), self.Color['black'],4)
                 #_____________________________________________________________________
             
@@ -739,7 +748,7 @@ class App:
                     x, y = kp.pt
                     x_coor.append(int(x))
                     y_coor.append(int(y))
-                print y_coor
+                #print y_coor
                 #work out histogram 
                 #n, bins, patches = plt.hist(y_coor,bins=height,range=(0,height),normed=False,weights=None,cumulative=False,bottom=None,histtype='bar',align='mid',orientation='vertical',rwidth=None,log=False,color=None,label=None,stacked=False)
                 bins = np.arange(height+1)
@@ -801,8 +810,8 @@ class App:
                 self.queueLock_work.release()
                 
                 #print out result monitoring
-                print "_____________________Cut List_____________________"
-                print cut_list
+                #print "_____________________Cut List_____________________"
+                #print cut_list
                 #then we illustrate the cut slide 
                 for i in cut_list:
                     #img_object_of_feature = Illustrate (img_object_of_feature,i)
@@ -854,6 +863,10 @@ class App:
             if self.CameraDebugScreen:
                 bg.imshow ('Camera 1',img1,self.ProcessDebug)    
     def MachineLearning(self):
+        #Com PLC Init - this is to initialise the sequence in PLC
+        self.Modbus_Client.Send_register(602, 10)
+        self.Modbus_Client.Send_register(600, 0)
+        
         while True:
             #debug variable
             old_comstate = self.ComState
@@ -876,7 +889,12 @@ class App:
             # State 1 :______________________________________________________________
             if self.ComState == 10:
                 #read D600
-                result_read = self.Modbus_Client.Read_register(0)
+                result_read = self.Modbus_Client.Read_register(600)
+                #___debug____
+                #self.Modbus_Client.Send_register(600, 0)
+                #print 'Read D600 = ',result_read
+                #self.Modbus_Client.Send_register(600, 0)
+                #___debug____end
                 if result_read == 1:
                     self.ComState = 20
             # State 2 :______________________________________________________________ 
@@ -896,38 +914,55 @@ class App:
                         data.append(self.workQueue.get())
                     data = sorted(data)
                     print "__________________________________________Clustered sample __________________________________________"
-                    after_parse = self.parse(data, 7)
+                    after_parse = self.parse(data, self.workQueue_len)
                     for cluster in after_parse:
                         result.append(sum(cluster)/len(cluster))
-                        print (cluster)
+                        #print (cluster)
                     #found the result
-                    print ('result = ',result)
+                    #print ('result = ',result)
                     #send result to D604
                     if result[0] != None:
-                        self.Modbus_Client.Send_register(4, result[0])
+                        #scale the result from pixal to mm then send to plc
+                        cut_width = self.CutParam['Blade_1'] + self.CutParam['Blade_2'] + self.CutParam['Blade_3'] + self.CutParam['Strip_1'] + self.CutParam['Strip_2']
+                        ref_distance = cut_width / 2 + result[0]
+                        ref_distance_mm = ref_distance * 1.25
+                        ref_rounded_mm = int(ref_distance_mm)
+                        print 'Cut distance from top ref to middle of saw = ',ref_rounded_mm
+                        self.Modbus_Client.Send_register(604, ref_rounded_mm)
                     else:
                         #Send default cut position if none of the cut line found
-                        self.Modbus_Client.Send_register(4, 50)
+                        self.Modbus_Client.Send_register(604, 10)
                     #next state
                     self.ComState = 30
             # State 3 :______________________________________________________________
-            elif self.Modbus_Client.ComState == 30:
+            elif self.ComState == 30:
                 #scan complete, result is written at target PLC
-                self.Modbus_Client.Send_register(2, 11)
+                self.Modbus_Client.Send_register(602, 11)
                 self.ComState = 40
             # State 4 :______________________________________________________________
             elif self.ComState == 40:
-                result_read = self.Modbus_Client.Read_register(0)
+                result_read = self.Modbus_Client.Read_register(600)
                 #reading is done on PLC - go to idle waiting mode
                 if result_read == 2:
-                    self.Modbus_Client.Send_register(2, 10)
-                    self.Modbus_Client.Send_register(0, 0)
+                    self.Modbus_Client.Send_register(602, 10)
+                    self.Modbus_Client.Send_register(600, 0)
                     self.ComState = 10
             
             #print out little debug message for com state
             #print 'Current com state = ',self.ComState
             if old_comstate <> self.ComState:
-                print 'Com State = ',self.ComState
+                if self.ComState == 10:
+                    print 'Com State = Idle        _ code ',self.ComState
+                elif self.ComState == 20:
+                    print 'Com State = Request     _ code ',self.ComState
+                elif self.ComState == 21:
+                    print 'Com State = Scanning    _ code ',self.ComState
+                elif self.ComState == 30:
+                    print 'Com State = Result sent _ code ',self.ComState
+                elif self.ComState == 40:
+                    print 'Com State = Close       _ code ',self.ComState
+
+                #print 'Com State = ',self.ComState
             self.queueLock_work.release()
             
             """
