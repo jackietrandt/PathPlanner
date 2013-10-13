@@ -30,6 +30,8 @@ import Queue
 #machine learning 
 #from sklearn import cluster, datasets
 from math import sqrt
+#for cross process communication to comservice module
+import rpyc
 
 #---------------------------------------------------------------------------# 
 # modbus serial com 
@@ -37,7 +39,6 @@ from math import sqrt
 from pymodbus.client.sync import ModbusSerialClient as ModbusClient
 import time
 import logging
-
 
 
 # Class - Modbus class and object
@@ -121,8 +122,21 @@ class Com_Modbus:
         pass
     
 
-
-
+#Class - ComServiceClient
+class ComServiceClient:
+    def __init__(self):
+        #connect to the com server on init
+        try:
+            c = rpyc.connect("localhost", 18861)
+            test_result = c.root.get_answer(10)
+            if test_result == 20:
+                print 'Connected to ComServer module !!! '
+            test_result = c.root.get_answer(20)
+            print test_result
+            
+        except:
+            print '______________________Cant find ComService Module, please start this module first before run this application_______________________'
+        
 # Class - Application and core functionality
 #_____________________________________________________________________________
 
@@ -143,6 +157,8 @@ class App:
         self.CameraDebugScreen = True #show raw capture from camera 1 and 2 for alignment and checking ___or disable at run mode
         self.ProcessDebug = False #show processed image in the middle
     def init_general_variable(self):
+        #init connection to comservice module - not in this file code - separate project folder and link through interprocess com rpyc
+        self.comClient = ComServiceClient()
         #init a modbus client for sending out result 
         self.Modbus_Client = Com_Modbus()
         self.ComState = 10
@@ -520,11 +536,11 @@ class App:
         return img_Master
 
     def Camera_Monitoring(self):
-        gain_old = self.capture1.get(cv2.cv.CV_CAP_PROP_GAIN)
-        gain_old_2 = self.capture2.get(cv2.cv.CV_CAP_PROP_GAIN)
+        #gain_old = self.capture1.get(cv2.cv.CV_CAP_PROP_GAIN)
+        #gain_old_2 = self.capture2.get(cv2.cv.CV_CAP_PROP_GAIN)
         #check if gain cap changed
         while True:
-            time.sleep(10)
+            time.sleep(1000)
             """
             gain_new = self.capture1.get(cv2.cv.CV_CAP_PROP_GAIN)
             print 'CV_CAP_PROP_GAIN = ',self.capture1.get(cv2.cv.CV_CAP_PROP_GAIN)
@@ -976,7 +992,7 @@ class App:
             >>> cluster_indices
             array([1, 1, 1, 0, 0, 0, 0, 2, 2, 2])
             """
-            time.sleep(1)
+            time.sleep(10)
         
 
     def test(self):
@@ -1080,3 +1096,4 @@ def main():
     
 if __name__ == "__main__":
     main()
+
