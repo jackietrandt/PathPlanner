@@ -124,19 +124,29 @@ class Com_Modbus:
 
 #Class - ComServiceClient
 class ComServiceClient:
+    connection = None
+    conn = None
+    share_read_data = None
     def __init__(self):
+        print 'Connecting to ComServer module....'
         #connect to the com server on init
         try:
-            c = rpyc.connect("localhost", 18861)
-            test_result = c.root.get_answer(10)
-            if test_result == 20:
-                print 'Connected to ComServer module !!! '
-            test_result = c.root.get_answer(20)
-            print test_result
-            
+            self.conn = rpyc.connect("localhost", 18861)
         except:
             print '______________________Cant find ComService Module, please start this module first before run this application_______________________'
+        else:
+            print 'Connection established'
+        self.connection = self.conn.root.ComServer()
         
+    #___Wrapper function for modbus client ________________________
+    #
+    #
+    def Send_register(self,address,data):
+        self.connection.Send_register(address,data)
+    def Read_register(self,address):
+        self.share_read_data = self.connection.Read_register(address)
+        return self.share_read_data
+#______________________________________________________________  
 # Class - Application and core functionality
 #_____________________________________________________________________________
 
@@ -159,8 +169,10 @@ class App:
     def init_general_variable(self):
         #init connection to comservice module - not in this file code - separate project folder and link through interprocess com rpyc
         self.comClient = ComServiceClient()
+        
         #init a modbus client for sending out result 
-        self.Modbus_Client = Com_Modbus()
+        #self.Modbus_Client = Com_Modbus()
+        #Modbus now handle by ComServer module
         self.ComState = 10
         #optical scaling from pixel count to mm
         # 1 pixal  = 1.25mm - this need to measure and change with different screen resolution
@@ -880,8 +892,11 @@ class App:
                 bg.imshow ('Camera 1',img1,self.ProcessDebug)    
     def MachineLearning(self):
         #Com PLC Init - this is to initialise the sequence in PLC
-        self.Modbus_Client.Send_register(602, 10)
-        self.Modbus_Client.Send_register(600, 0)
+        
+        self.comClient.Send_register(602, 10)
+        self.comClient.Send_register(600, 0)
+        #self.Modbus_Client.Send_register(602, 10)
+        #self.Modbus_Client.Send_register(600, 0)
         
         while True:
             #debug variable
@@ -905,12 +920,7 @@ class App:
             # State 1 :______________________________________________________________
             if self.ComState == 10:
                 #read D600
-                result_read = self.Modbus_Client.Read_register(600)
-                #___debug____
-                #self.Modbus_Client.Send_register(600, 0)
-                #print 'Read D600 = ',result_read
-                #self.Modbus_Client.Send_register(600, 0)
-                #___debug____end
+                result_read = self.comClient.Read_register(600)
                 if result_read == 1:
                     self.ComState = 20
             # State 2 :______________________________________________________________ 
@@ -944,24 +954,24 @@ class App:
                         ref_distance_mm = ref_distance * 1.25
                         ref_rounded_mm = int(ref_distance_mm)
                         print 'Cut distance from top ref to middle of saw = ',ref_rounded_mm
-                        self.Modbus_Client.Send_register(604, ref_rounded_mm)
+                        self.comClient.Send_register(604, ref_rounded_mm)
                     else:
                         #Send default cut position if none of the cut line found
-                        self.Modbus_Client.Send_register(604, 10)
+                        self.comClient.Send_register(604, 10)
                     #next state
                     self.ComState = 30
             # State 3 :______________________________________________________________
             elif self.ComState == 30:
                 #scan complete, result is written at target PLC
-                self.Modbus_Client.Send_register(602, 11)
+                self.comClient.Send_register(602, 11)
                 self.ComState = 40
             # State 4 :______________________________________________________________
             elif self.ComState == 40:
-                result_read = self.Modbus_Client.Read_register(600)
+                result_read = self.comClient.Read_register(600)
                 #reading is done on PLC - go to idle waiting mode
                 if result_read == 2:
-                    self.Modbus_Client.Send_register(602, 10)
-                    self.Modbus_Client.Send_register(600, 0)
+                    self.comClient.Send_register(602, 10)
+                    self.comClient.Send_register(600, 0)
                     self.ComState = 10
             
             #print out little debug message for com state
@@ -993,7 +1003,7 @@ class App:
             array([1, 1, 1, 0, 0, 0, 0, 2, 2, 2])
             """
             time.sleep(10)
-        
+            
 
     def test(self):
         pass
