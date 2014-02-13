@@ -181,11 +181,16 @@ class App:
         self.ImgMerged = np.zeros((60,20,3),np.uint8)
         self.IsOperation = False
         self.CamMonitorThread_ImageReady = False
+        #Trim offset
+        self.TrimOffset_right = 0
+        self.Trim_right_org = 0
         #Share generic dictionary which used across functions
         self.KeyDictionary = {'key_up':2490368,
                          'key_down':2621440,
                          'key_left':2424832,
                          'key_right':2555904,
+                         'key_4':52,
+                         'key_6':54,
                          'key_r':114, #reset trim parameter
                          'key_d':100, #debug show image
                          'key_s':115, #sample background image
@@ -232,7 +237,8 @@ class App:
         self.event = threading.Event()
         #holding queue for passing object across thread
         self.queueLock_image = threading.Lock() #Interlock to pass image processed from Camera monitor thread to Path finder thread
-        self.queueLock_work = threading.Lock()
+        self.queueLock_work = threading.Lock()  #Interlock comm state between machine learning thread with Path finder thread
+        self.queueLock_trim = threading.Lock()  #Interlock updating trim parameter between Machine learning thread with Path finder thread
         self.queueLock_result = threading.Lock()
         self.workQueue_len = 4
         self.workQueue = Queue.Queue(self.workQueue_len)
@@ -350,6 +356,11 @@ class App:
             self.TrimParam['left'] = self.TrimParam['left'] + 2
         if key == self.KeyDictionary['key_right']:
             self.TrimParam['right'] = self.TrimParam['right'] + 2
+        if key == self.KeyDictionary['key_4']:
+            self.TrimParam['left'] = self.TrimParam['left'] - 2
+        if key == self.KeyDictionary['key_6']:
+            self.TrimParam['right'] = self.TrimParam['right'] - 2
+
         if key == self.KeyDictionary['key_r']:
             self.TrimParam['right'] = 0
             self.TrimParam['left'] = 0
@@ -578,6 +589,7 @@ class App:
         config = self.Configuration()
         config.read()
         self.TrimParam = config.ConfigDictionary['TrimParam']
+        self.Trim_right_org = self.TrimParam['right']
         BackgroundSample = config.ConfigDictionary['BackgroundSample']
         CutParam = config.ConfigDictionary['CutParam']
         CutParam['Initialised'] = False
@@ -585,7 +597,6 @@ class App:
         print config.RunState
         #Tracker for feature detection
         tracker = PlaneTracker()
-    
         #Configure capture screen resolution
         if self.ModeTest:
             #self.capture1.set(cv2.cv.CV_CAP_PROP_FRAME_WIDTH, 1920)
@@ -612,6 +623,9 @@ class App:
         #put it in trim mode first , to initialise other parameter before run
         config.RunStateUpdate()
         while True:
+            #_____________________________________________________________________________________________
+            #Switching between image reading source directly from Path finder thread to Camera monitoring thread // Fasten processing time
+            #_____________________________________________________________________________________________
             if self.IsOperation and self.CamMonitorThread_ImageReady:
                 #Switch over to Camera Monitoring thread to collect and merge 2 camera
                 self.queueLock_image.acquire()
@@ -619,8 +633,14 @@ class App:
                 self.queueLock_image.release()
             else:
                 img1 = self.merge_2cam()
-            #flas,img2 = capture2.read()
-            
+            #_____________________________________________________________________________________________
+            #Update Trim offset right - for different wood lenght // which interlock with machine learning thread and comm
+            #_____________________________________________________________________________________________
+            self.queueLock_trim.acquire()
+            self.TrimParam['right'] = self.Trim_right_org + self.TrimOffset_right;
+            self.queueLock_trim.release()
+
+            #_____________________________________________________________________________________________
             img_trimmed = bg.Background_Trim(img1,self.TrimParam)
             img_trimmed_overlay = img_trimmed.copy()
             
@@ -870,7 +890,7 @@ class App:
                 cv2.imshow('Trimmed',img_trimmed)
             key = cv.WaitKey(2)
             #if key <> -1:
-                #print key
+            #    print key
             if key == self.KeyDictionary['key_esc']:
                 self.event.set()
                 break
@@ -912,11 +932,11 @@ class App:
                 bg.imshow ('Camera 1',img1,self.ProcessDebug)    
     def MachineLearning(self):
         #Com PLC Init - this is to initialise the sequence in PLC
-        
         self.comClient.Send_register(602, 10)
         self.comClient.Send_register(600, 0)
         #self.Modbus_Client.Send_register(602, 10)
         #self.Modbus_Client.Send_register(600, 0)
+        PreviousTrim_Offset = 0
         
         while True:
             #debug variable
@@ -977,7 +997,9 @@ class App:
                         self.comClient.Send_register(604, ref_rounded_mm)
                     else:
                         #Send default cut position if none of the cut line found
-                        self.comClient.Send_register(604, 10)
+                        #self.comClient.Send_register(604, 10)
+                        #D610 - send error code to PLC
+                        self.comClient.Send_register(610, 1)
                     #next state
                     self.ComState = 30
             # State 3 :______________________________________________________________
@@ -1011,17 +1033,27 @@ class App:
                 #print 'Com State = ',self.ComState
             self.queueLock_work.release()
             
-            """
-
-            
-            >>> import numpy as np
-            >>> from scipy.cluster.vq import kmeans, vq
-            >>> y = np.array([1,2,3,60,70,80,100,220,230,250])
-            >>> codebook, _ = kmeans(y, 3)  # three clusters
-            >>> cluster_indices, _ = vq(y, codebook)
-            >>> cluster_indices
-            array([1, 1, 1, 0, 0, 0, 0, 2, 2, 2])
-            """
+            #__________________________________________________________________________
+            #Pull the D608 register for update of new length offset
+            NewTrim_Offset = self.comClient.Read_register(608)
+            if PreviousTrim_Offset != NewTrim_Offset and NewTrim_Offset != None:
+                print 'New scan lenght = ',NewTrim_Offset
+                if NewTrim_Offset == 2400:
+                    Offset = 0
+                if NewTrim_Offset == 2100:
+                    Offset = 5
+                if NewTrim_Offset == 1800:
+                    Offset = 10
+                if NewTrim_Offset == 1200:
+                    Offset = 15
+                if NewTrim_Offset == 1050:
+                    Offset = 18
+                if NewTrim_Offset == 900:
+                    Offset = 21
+                self.queueLock_trim.acquire()
+                self.TrimOffset_right = Offset;
+                self.queueLock_trim.release()
+                PreviousTrim_Offset = NewTrim_Offset
             time.sleep(10)
             
 
