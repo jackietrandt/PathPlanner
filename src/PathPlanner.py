@@ -177,6 +177,10 @@ class App:
         #optical scaling from pixel count to mm
         # 1 pixal  = 1.25mm - this need to measure and change with different screen resolution
         self.mmPerPixal = 1.25
+        #Image share parameter to pass between Monitor thread and path finder thread
+        self.ImgMerged = np.zeros((60,20,3),np.uint8)
+        self.IsOperation = False
+        self.CamMonitorThread_ImageReady = False
         #Share generic dictionary which used across functions
         self.KeyDictionary = {'key_up':2490368,
                          'key_down':2621440,
@@ -227,6 +231,7 @@ class App:
         self.threads = []
         self.event = threading.Event()
         #holding queue for passing object across thread
+        self.queueLock_image = threading.Lock() #Interlock to pass image processed from Camera monitor thread to Path finder thread
         self.queueLock_work = threading.Lock()
         self.queueLock_result = threading.Lock()
         self.workQueue_len = 4
@@ -554,7 +559,14 @@ class App:
         #gain_old_2 = self.capture2.get(cv2.cv.CV_CAP_PROP_GAIN)
         #check if gain cap changed
         while True:
-            time.sleep(10000)
+            if self.IsOperation:
+                img2 = self.merge_2cam()
+                self.queueLock_image.acquire()
+                self.CamMonitorThread_ImageReady = True
+                self.ImgMerged = img2.copy()
+                self.queueLock_image.release()
+            else:
+                time.sleep(10)
             """
             gain_new = self.capture1.get(cv2.cv.CV_CAP_PROP_GAIN)
             print 'CV_CAP_PROP_GAIN = ',self.capture1.get(cv2.cv.CV_CAP_PROP_GAIN)
@@ -600,14 +612,20 @@ class App:
         #put it in trim mode first , to initialise other parameter before run
         config.RunStateUpdate()
         while True:
-
-            img1 = self.merge_2cam()
+            if self.IsOperation and self.CamMonitorThread_ImageReady:
+                #Switch over to Camera Monitoring thread to collect and merge 2 camera
+                self.queueLock_image.acquire()
+                img1 = self.ImgMerged
+                self.queueLock_image.release()
+            else:
+                img1 = self.merge_2cam()
             #flas,img2 = capture2.read()
             
             img_trimmed = bg.Background_Trim(img1,self.TrimParam)
             img_trimmed_overlay = img_trimmed.copy()
             
             if config.GetRunState() == 'Operational':
+                self.IsOperation = True # Flag this so Cam monitoring thread start to patching image through after the configuration is loaded
                 #___________________________Smooth___________________________
                 #img_trimmed = bg.Background_k_mean(img_trimmed)
                 #img_trimmed = cv2.GaussianBlur(img_trimmed,(3,3),0)
