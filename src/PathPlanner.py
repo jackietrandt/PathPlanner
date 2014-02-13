@@ -528,11 +528,13 @@ class App:
     def merge_2cam(self):
         if self.camera_ready == False:
             self.camera_ready = self.capture1.isOpened() and self.capture2.isOpened() 
+            print ("Waiting for USB cams booting")
             t = cv.WaitKey(1000)
         flas1,img1 = self.capture1.read()
         flas2,img2 = self.capture2.read()
-        img2 = ndimage.rotate(img2, self.TrimParam['angle_right'])
         img1 = ndimage.rotate(img1, self.TrimParam['angle_left'])
+        img2 = ndimage.rotate(img2, self.TrimParam['angle_right'])
+        
    
         #__Merge__create a holder of the merged image from camera capture 1 and 2
         height, width, depth = img1.shape
@@ -552,7 +554,7 @@ class App:
         #gain_old_2 = self.capture2.get(cv2.cv.CV_CAP_PROP_GAIN)
         #check if gain cap changed
         while True:
-            time.sleep(1000)
+            time.sleep(10000)
             """
             gain_new = self.capture1.get(cv2.cv.CV_CAP_PROP_GAIN)
             print 'CV_CAP_PROP_GAIN = ',self.capture1.get(cv2.cv.CV_CAP_PROP_GAIN)
