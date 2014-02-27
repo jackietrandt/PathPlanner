@@ -176,7 +176,8 @@ class App:
         self.ComState = 10
         #optical scaling from pixel count to mm
         # 1 pixal  = 1.25mm - this need to measure and change with different screen resolution
-        self.mmPerPixal = 1.25
+        self.mmPerPixal = 1.286
+        self.mmTotalLength = 2445
         #Image share parameter to pass between Monitor thread and path finder thread
         self.ImgMerged = np.zeros((60,20,3),np.uint8)
         self.IsOperation = False
@@ -191,6 +192,8 @@ class App:
                          'key_right':2555904,
                          'key_4':52,
                          'key_6':54,
+                         'key_2':50,
+                         'key_8':56,
                          'key_r':114, #reset trim parameter
                          'key_d':100, #debug show image
                          'key_s':115, #sample background image
@@ -350,12 +353,17 @@ class App:
         
         if key == self.KeyDictionary['key_up']:
             self.TrimParam['bottom'] = self.TrimParam['bottom'] + 2
+        if key == self.KeyDictionary['key_2']:
+            self.TrimParam['bottom'] = self.TrimParam['bottom'] - 2
         if key == self.KeyDictionary['key_down']:
             self.TrimParam['top'] = self.TrimParam['top'] + 2
+        if key == self.KeyDictionary['key_8']:
+            self.TrimParam['top'] = self.TrimParam['top'] - 2
         if key == self.KeyDictionary['key_left']:
             self.TrimParam['left'] = self.TrimParam['left'] + 2
         if key == self.KeyDictionary['key_right']:
             self.TrimParam['right'] = self.TrimParam['right'] + 2
+            print 'key right = ',self.TrimParam['right']
         if key == self.KeyDictionary['key_4']:
             self.TrimParam['left'] = self.TrimParam['left'] - 2
         if key == self.KeyDictionary['key_6']:
@@ -557,10 +565,10 @@ class App:
         height2, width2, depth = img2.shape
         master_width = width*2 + 60
         img_Master = np.zeros((height + 60,master_width,depth),np.uint8)
-
         #__Merge__copy camera 0 ,1 image over master holder
         
         img_Master[0:height,0:width-10] = img1[0:height,0:width-10]
+        #img_Master[0:height2-self.TrimParam['off_virtical_left'],width-10:width-10+width2-self.TrimParam['trim_left_left']] = img2[self.TrimParam['off_virtical_left']:height2,self.TrimParam['trim_left_left']:width2]
         img_Master[0:height2-self.TrimParam['off_virtical_left'],width-10:width-10+width2-self.TrimParam['trim_left_left']] = img2[self.TrimParam['off_virtical_left']:height2,self.TrimParam['trim_left_left']:width2]
 
         return img_Master
@@ -636,10 +644,10 @@ class App:
             #_____________________________________________________________________________________________
             #Update Trim offset right - for different wood lenght // which interlock with machine learning thread and comm
             #_____________________________________________________________________________________________
-            self.queueLock_trim.acquire()
-            self.TrimParam['right'] = self.Trim_right_org + self.TrimOffset_right;
-            self.queueLock_trim.release()
-
+            if config.GetRunState() == 'Operational':
+                self.queueLock_trim.acquire()
+                self.TrimParam['right'] = self.Trim_right_org + self.TrimOffset_right;
+                self.queueLock_trim.release()
             #_____________________________________________________________________________________________
             img_trimmed = bg.Background_Trim(img1,self.TrimParam)
             img_trimmed_overlay = img_trimmed.copy()
@@ -884,10 +892,15 @@ class App:
                 for i in cut_list:
                     #img_object_of_feature = Illustrate (img_object_of_feature,i)
                     self.Illustrate (img_object_of_feature,i)
-                bg.imshow ('Illustrated',img_object_of_feature,True)
+                    resized_illu_h,resized_illu_w, resized_illu_d = img_object_of_feature.shape
+                    resized_illu = cv2.resize(img_object_of_feature,(int(round(resized_illu_w/1.2)),int(round(resized_illu_h/1.2))))
+                bg.imshow ('Illustrated',resized_illu,True)
                 #_______________________________________________________________________________________________
             else:
-                cv2.imshow('Trimmed',img_trimmed)
+                resized_trim_h,resized_trim_w, resized_trim_d = img_trimmed.shape
+                
+                resized_trim = cv2.resize(img_trimmed,(int(round(resized_trim_w/1.2)),int(round(resized_trim_h/1.2))))
+                cv2.imshow('Trimmed',resized_trim)
             key = cv.WaitKey(2)
             #if key <> -1:
             #    print key
@@ -906,6 +919,8 @@ class App:
             #Change KeySelect function mode
             if key == self.KeyDictionary['key_tab']:
                 config.RunStateUpdate()
+                if config.GetRunState() == 'Operational':
+                    cv2.destroyWindow('Trimmed')
             #Let sample so background image
             if key == self.KeyDictionary['key_s']:
                 img_background_sample = bg.Background_Sample(img_trimmed, BackgroundSample)
@@ -956,6 +971,10 @@ class App:
             # State 4 : PLC -> PC : D600 - code 2  - Reading is done
             # State 5 : PC -> PLC : D602 - code 10 - Comm idle ready for next set
             #                       D604 - 0
+            #
+            # State # : Pull the  : D608 - register for update of new length offset
+            #                     : D610 - send error code to PLC if none of the cut band is good enough 
+            #                     : D616 - com server alive check
             
             # State 1 :______________________________________________________________
             if self.ComState == 10:
@@ -1036,23 +1055,28 @@ class App:
             #__________________________________________________________________________
             #Pull the D608 register for update of new length offset
             NewTrim_Offset = self.comClient.Read_register(608)
+            check_valid = False
             if PreviousTrim_Offset != NewTrim_Offset and NewTrim_Offset != None:
-                print 'New scan lenght = ',NewTrim_Offset
                 if NewTrim_Offset == 2400:
-                    Offset = 0
+                    check_valid = True
                 if NewTrim_Offset == 2100:
-                    Offset = 5
+                    check_valid = True
                 if NewTrim_Offset == 1800:
-                    Offset = 10
+                    check_valid = True
                 if NewTrim_Offset == 1200:
-                    Offset = 15
+                    check_valid = True
                 if NewTrim_Offset == 1050:
-                    Offset = 18
+                    check_valid = True
                 if NewTrim_Offset == 900:
-                    Offset = 21
-                self.queueLock_trim.acquire()
-                self.TrimOffset_right = Offset;
-                self.queueLock_trim.release()
+                    check_valid = True
+                if check_valid:
+                    Offset = (self.mmTotalLength - NewTrim_Offset) / self.mmPerPixal
+                    print 'New scan lenght = ',NewTrim_Offset
+                    self.queueLock_trim.acquire()
+                    self.TrimOffset_right = Offset;
+                    self.queueLock_trim.release()
+                else:
+                    print 'New scan lenght invalid = ',NewTrim_Offset
                 PreviousTrim_Offset = NewTrim_Offset
             time.sleep(10)
             
